@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -35,6 +36,7 @@ PERCENT_COLUMNS = {
 
 def export_all(
     period: str,
+    industry_group: str,
     output: Path,
     screening: list[dict],
     raw: list[dict],
@@ -46,10 +48,11 @@ def export_all(
     review: list[dict],
 ) -> dict[str, Path]:
     output.mkdir(parents=True, exist_ok=True)
-    stem = f"Capital_Goods_Screening_{period}"
+    safe_group = "_".join(re.findall(r"[A-Za-z0-9]+", industry_group))
+    stem = f"{safe_group}_Screening_{period}"
     workbook_path = output / f"{stem}.xlsx"
     csv_path = output / f"{stem}.csv"
-    summary_path = output / f"Capital_Goods_Summary_{period}.md"
+    summary_path = output / f"{safe_group}_Summary_{period}.md"
     review_path = output / "manual_review.csv"
 
     frames = {
@@ -68,7 +71,9 @@ def export_all(
         _format_workbook(writer.book)
     frames["01_Screening"].to_csv(csv_path, index=False)
     pd.DataFrame(review).to_csv(review_path, index=False)
-    summary_path.write_text(_markdown_summary(period, screening, review), encoding="utf-8")
+    summary_path.write_text(
+        _neutral_markdown_summary(period, industry_group, screening, review), encoding="utf-8"
+    )
     return {"xlsx": workbook_path, "csv": csv_path, "markdown": summary_path, "review": review_path}
 
 
@@ -111,7 +116,11 @@ def _summary_frame(rows: list[dict]) -> pd.DataFrame:
     data = []
     frame = pd.DataFrame(rows)
     for metric in metrics:
-        series = pd.to_numeric(frame.get(metric), errors="coerce")
+        series = (
+            pd.to_numeric(frame[metric], errors="coerce")
+            if metric in frame
+            else pd.Series(dtype=float)
+        )
         data.append(
             {
                 "Metric": f"Sector median {metric}",
@@ -131,17 +140,14 @@ def _markdown_summary(period: str, rows: list[dict], review: list[dict]) -> str:
         "",
     ]
     for metric in ("P/E", "P/B", "ROE", "Dividend Yield"):
-        series = pd.to_numeric(frame.get(metric), errors="coerce").dropna()
+        series = (
+            pd.to_numeric(frame[metric], errors="coerce").dropna()
+            if metric in frame
+            else pd.Series(dtype=float)
+        )
         value = series.median() if not series.empty else None
         rendered = "NA" if value is None else f"{value:.4f}"
         lines.append(f"- Sector median {metric}: {rendered}")
-    lines += ["", "## Raw metric extremes", ""]
-    for metric in ("Revenue", "Net Profit", "EPS", "ROE"):
-        series = pd.to_numeric(frame.get(metric), errors="coerce").dropna()
-        if not series.empty:
-            lines.append(
-                f"- {metric}: highest {frame.loc[series.idxmax(), 'Ticker']}; lowest {frame.loc[series.idxmin(), 'Ticker']}."
-            )
     missing = [row["Ticker"] for row in rows if row.get("Data Confidence") != "high"]
     lines += [
         "",
@@ -150,7 +156,40 @@ def _markdown_summary(period: str, rows: list[dict], review: list[dict]) -> str:
         f"Companies requiring review: {', '.join(missing) or 'None'}.",
         f"Manual-review items: {len(review)}.",
         "",
-        "No ranking, score, or investment recommendation is produced.",
+        "This report contains no ranking, score, selection, or investment recommendation.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def _neutral_markdown_summary(
+    period: str, industry_group: str, rows: list[dict], review: list[dict]
+) -> str:
+    frame = pd.DataFrame(rows)
+    lines = [
+        f"# {industry_group} screening summary - {period}",
+        "",
+        f"Companies processed: **{len(rows)}**.",
+        "",
+    ]
+    for metric in ("P/E", "P/B", "ROE", "Dividend Yield"):
+        series = (
+            pd.to_numeric(frame[metric], errors="coerce").dropna()
+            if metric in frame
+            else pd.Series(dtype=float)
+        )
+        value = series.median() if not series.empty else None
+        rendered = "NA" if value is None else f"{value:.4f}"
+        lines.append(f"- Sector median {metric}: {rendered}")
+    missing = [row["Ticker"] for row in rows if row.get("Data Confidence") != "high"]
+    lines += [
+        "",
+        "## Missing data and warnings",
+        "",
+        f"Companies requiring review: {', '.join(missing) or 'None'}.",
+        f"Manual-review items: {len(review)}.",
+        "",
+        "This report contains no ranking, score, selection, or investment recommendation.",
         "",
     ]
     return "\n".join(lines)

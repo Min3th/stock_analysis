@@ -3,9 +3,12 @@
 A reusable, traceable Python pipeline for quarterly screening of Colombo Stock
 Exchange companies in the Capital Goods industry group.
 
-The working pilot processes Access Engineering, ACL Cables, and Hayleys using
-official investor-relations reports plus current CSE market data. Extraction is
-deliberately conservative: incomplete fields are exported to manual review.
+The pipeline resolves any supported CSE GICS industry group at runtime from the
+official classification endpoints. Access Engineering, ACL Cables, and Hayleys
+currently have document extraction configurations; every other constituent is
+included with official market data and explicit missing-document review items.
+Extraction is deliberately conservative: incomplete fields are exported to
+manual review.
 
 ## Design priorities
 
@@ -37,6 +40,7 @@ python -m pip install -e ".[ocr]"
 
 ```powershell
 python main.py --sector "Capital Goods" --period 2026Q3
+python main.py --sector "Banks" --period 2026Q3
 python main.py --company ACL.N0000 --period 2026Q3
 ```
 
@@ -79,15 +83,29 @@ relations documents.
 
 ## Company configuration
 
-Edit `config/companies.yml`. Each entry records the ticker, official CSE profile,
-date-stamped classification source, and official document URLs. The example file
-is safe to copy when creating another universe. Do not put extracted financial
-values in configuration; facts must originate from source documents.
+The company universe is downloaded from CSE each run. `config/companies.yml` is
+an optional ticker-keyed overlay for official report URLs and publication dates;
+it does not define sector membership. Do not put extracted financial values in
+configuration; facts must originate from source documents.
 
-The official CSE sector-statistics report dated 25 September 2026 reports 30
-listed Capital Goods securities. The pilot does not assert a full 28- or
-30-company constituent list; that must be obtained from a date-stamped official
-classification source before the expansion milestone.
+Supported `--sector` values are Energy, Materials, Capital Goods, Commercial &
+Professional Services, Transportation, Automobiles & Components, Consumer
+Durables & Apparel, Consumer Services, Retailing, Food & Staples Retailing,
+Food, Beverage & Tobacco, Household & Personal Products, Health Care Equipment
+& Services, Banks, Diversified Financials, Insurance, Software & Services,
+Telecommunication Services, Utilities, and Real Estate Management & Development.
+
+The current CSE hierarchy names the last category `Real Estate`; both names are
+accepted. CSE currently exposes the former `Software & Services` category as
+`Technology Hardware & Equipment`, so both inputs resolve to that official group.
+At the time of validation, the CSE endpoint returned no listed constituents for
+that technology group; the pipeline therefore creates a valid empty report rather
+than substituting companies from another category.
+
+The CSE universe response is authoritative for a run and may differ from a daily
+sector-statistics security count because of inactive or separately listed share
+classes. The source URL and runtime result are retained rather than forcing a
+hard-coded expected count.
 
 ## Extraction and review
 
@@ -117,8 +135,8 @@ they are never used as company-specific facts.
   note-level extraction, which is still pending.
 - TTM construction is intentionally not implemented until non-overlapping
   quarters can be validated.
-- Dividend-announcement discovery and the complete sector universe remain part
-  of the scale-up milestone.
+- Dividend-announcement and automatic financial-document discovery remain part
+  of the scale-up milestone. Until then, unconfigured tickers are market-data-only.
 - CSE's public market endpoint is operational but undocumented; failures become
   review items rather than silent gaps.
 
@@ -128,5 +146,12 @@ they are never used as company-specific facts.
 2. End-to-end pilot for three representative companies, including tests and
    initial Excel/CSV/Markdown output (complete).
 3. Harden extraction strategies and manual corrections from review findings.
-4. Expand the configurable universe to all current Capital Goods companies.
+4. Add automatic document discovery and extraction coverage across every current
+   constituent returned for the selected industry group.
+
+## Neutrality policy
+
+The program does not rank securities, assign a score, select a security, or
+produce investment recommendations. Outputs contain raw values, calculated
+metrics, sector medians, provenance, and data-quality warnings only.
 

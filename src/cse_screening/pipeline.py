@@ -11,6 +11,7 @@ import yaml
 
 from .calculations.ratios import dividend_yield, payout_ratio, price_earnings, price_to_book
 from .downloaders.http import CachedDownloader, get_market_data
+from .downloaders.universe import CSEUniverseClient
 from .exporters.workbook import export_all
 from .extractors.statements import METRIC_ALIASES, extract_metrics
 from .parsers.pdf import extract_pages
@@ -47,13 +48,24 @@ SCREEN_COLUMNS = [
 ]
 
 
-def run(period: str, company: str | None = None, root: Path = Path(".")) -> dict[str, Path]:
+def run(
+    period: str,
+    industry_group: str = "Capital Goods",
+    company: str | None = None,
+    root: Path = Path("."),
+) -> dict[str, Path]:
     config = yaml.safe_load((root / "config" / "companies.yml").read_text(encoding="utf-8"))
-    companies = config["companies"]
+    configured = {item["ticker"]: item for item in config["companies"]}
+    group, companies = CSEUniverseClient().companies(industry_group)
+    for issuer in companies:
+        if issuer["ticker"] in configured:
+            market_data = issuer["market_data"]
+            issuer.update(configured[issuer["ticker"]])
+            issuer["market_data"] = market_data
     if company:
         companies = [item for item in companies if item["ticker"] == company]
         if not companies:
-            raise ValueError(f"Ticker {company!r} is not configured")
+            raise ValueError(f"Ticker {company!r} is not in the selected CSE industry group")
     downloader = CachedDownloader(root / "data" / "raw")
     raw, sources, screening, ratios, history, review = [], [], [], [], [], []
     thresholds = yaml.safe_load((root / "config" / "pipeline.example.yml").read_text())["flags"]
@@ -153,8 +165,10 @@ def run(period: str, company: str | None = None, root: Path = Path(".")) -> dict
                         }
             except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
                 document_errors.append(f"{document['title']}: {exc}")
+        market = issuer.get("market_data")
         try:
-            market = get_market_data(issuer["ticker"])
+            if market is None:
+                market = get_market_data(issuer["ticker"])
         except (httpx.HTTPError, KeyError, ValueError) as exc:
             market = {
                 "price": None,
@@ -230,6 +244,10 @@ def run(period: str, company: str | None = None, root: Path = Path(".")) -> dict
                 }
             )
         missing = [metric for metric in METRIC_ALIASES if metric not in facts]
+        if not issuer.get("documents"):
+            document_errors.append(
+                "No official financial document URLs are configured yet; market data only"
+            )
         for metric in missing:
             review.append(
                 {
@@ -258,6 +276,7 @@ def run(period: str, company: str | None = None, root: Path = Path(".")) -> dict
             )
     return export_all(
         period,
+        group["industry_group"],
         root / "reports",
         screening,
         raw,
