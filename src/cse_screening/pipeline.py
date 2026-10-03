@@ -21,6 +21,7 @@ from .calculations.ratios import (
     roa,
     roe,
 )
+from .corrections import correction_candidates, load_corrections
 from .downloaders.announcements import CSEDividendClient, dividend_type
 from .downloaders.http import CachedDownloader, get_market_data
 from .downloaders.universe import CSEUniverseClient
@@ -74,6 +75,7 @@ def run(
     industry_group: str = "Capital Goods",
     company: str | None = None,
     root: Path = Path("."),
+    correction_path: Path | None = None,
 ) -> dict[str, Path]:
     config = yaml.safe_load((root / "config" / "companies.yml").read_text(encoding="utf-8"))
     configured = {item["ticker"]: item for item in config["companies"]}
@@ -87,6 +89,12 @@ def run(
         companies = [item for item in companies if item["ticker"] == company]
         if not companies:
             raise ValueError(f"Ticker {company!r} is not in the selected CSE industry group")
+    if correction_path is None:
+        correction_path = root / "config" / "corrections.yml"
+    elif not correction_path.is_absolute():
+        correction_path = root / correction_path
+    corrections = load_corrections(correction_path)
+    applied_corrections: set[str] = set()
     downloader = CachedDownloader(root / "data" / "raw")
     raw, sources, screening, ratios, history, review, dividends = [], [], [], [], [], [], []
     dividend_error = None
@@ -137,6 +145,9 @@ def run(
                     elif candidate["confidence"] > existing["confidence"]:
                         extracted.remove(existing)
                         extracted.append(candidate)
+                for candidate in correction_candidates(corrections, issuer["ticker"], document):
+                    extracted.append(candidate)
+                    applied_corrections.add(candidate["correction_id"])
                 doc_id = checksum[:16]
                 sources.append(
                     {
@@ -155,8 +166,11 @@ def run(
                     }
                 )
                 for fact in extracted:
+                    fact_suffix = (
+                        f":correction:{fact['correction_id']}" if fact.get("correction_id") else ""
+                    )
                     record = {
-                        "Fact ID": f"{issuer['ticker']}:{doc_id}:{fact['metric']}:{fact['page']}",
+                        "Fact ID": f"{issuer['ticker']}:{doc_id}:{fact['metric']}:{fact['page']}{fact_suffix}",
                         "Company": issuer["name"],
                         "Ticker": issuer["ticker"],
                         "Financial Period": str(document["period_end"]),
@@ -176,6 +190,8 @@ def run(
                             "notes",
                             "First matching consolidated-statement candidate; review before investment use.",
                         ),
+                        "Correction ID": fact.get("correction_id"),
+                        "Statement Scope": fact.get("statement_scope"),
                     }
                     raw.append(record)
                     if (
@@ -192,6 +208,16 @@ def run(
                         and fact["confidence"] >= Decimal("0.8")
                     ):
                         year = document["period_end"].year
+                        if fact.get("correction_id"):
+                            history[:] = [
+                                item
+                                for item in history
+                                if not (
+                                    item["Ticker"] == issuer["ticker"]
+                                    and item["Metric"] == fact["metric"]
+                                    and item["Financial Year End"] == f"{year}-03-31"
+                                )
+                            ]
                         # Later columns may switch from Group to Company scope.
                         comparable_values = fact["comparatives"][:2]
                         if len(comparable_values) == 2 and abs(comparable_values[1]) < abs(
@@ -226,10 +252,10 @@ def run(
                         }
                     if document["kind"] == "annual_report":
                         prior_annual = annual_facts.get(fact["metric"])
-                        if (
-                            prior_annual is None
-                            or str(document["period_end"]) > prior_annual["period"]
-                        ):
+                        if prior_annual is None or (
+                            str(document["period_end"]),
+                            fact["confidence"],
+                        ) > (prior_annual["period"], prior_annual["confidence"]):
                             annual_facts[fact["metric"]] = {
                                 **fact,
                                 "period": str(document["period_end"]),
@@ -512,6 +538,19 @@ def run(
                     "Reason for Uncertainty": error,
                 }
             )
+    selected_tickers = {item["ticker"] for item in companies}
+    unapplied = [
+        item["id"]
+        for item in corrections
+        if item.get("status", "active") == "active"
+        and item["ticker"] in selected_tickers
+        and str(item["id"]) not in applied_corrections
+    ]
+    if unapplied:
+        raise ValueError(
+            "Active corrections did not match a configured document exactly: "
+            + ", ".join(map(str, unapplied))
+        )
     return export_all(
         period,
         group["industry_group"],

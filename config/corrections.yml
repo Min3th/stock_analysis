@@ -1,0 +1,3 @@
+# Append-only manual correction overlay. Keep old entries and mark them
+# status: superseded when a replacement is added with a new unique id.
+corrections: []

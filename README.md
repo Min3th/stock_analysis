@@ -44,6 +44,7 @@ python -m pip install -e ".[ocr]"
 python main.py --sector "Capital Goods" --period 2026Q3
 python main.py --sector "Banks" --period 2026Q3
 python main.py --company ACL.N0000 --period 2026Q3
+python main.py --company ACL.N0000 --period 2026Q3 --corrections config/corrections.yml
 ```
 
 Downloaded PDFs are cached under `data/raw/<ticker>/`. Rerunning the same URLs
@@ -120,10 +121,39 @@ base LKR, and note references are separated from values. The workbook preserves
 original value/unit/text and the normalized result. Low-confidence or absent
 facts appear in `reports/manual_review.csv` rather than being guessed.
 
-For a manual correction, first verify the consolidated/group column and period
-in the cited PDF. Record the candidate and reason in the review file; the planned
-next hardening step is an append-only YAML correction overlay so corrections
-remain reproducible without changing source evidence.
+For a manual correction, first verify the consolidated/group column, unit,
+period, and page in the cited PDF. Copy the unresolved item into
+`config/corrections.yml` using this form:
+
+```yaml
+corrections:
+  - id: acl-revenue-fy26-v1
+    status: active
+    ticker: ACL.N0000
+    metric: revenue
+    financial_period: 2026-03-31
+    source_document: Annual Report 2025/26
+    value: "45507.610"
+    unit: LKR million
+    source_page: 122
+    statement_scope: group
+    source_text: "Revenue 45,507.610 ..."
+    reason: Verified against the consolidated current-year column
+    author: analyst-name
+    corrected_at: 2026-10-03
+```
+
+`value` is expressed in the stated `unit` and normalized by the pipeline. The
+ticker, period, and document title must match exactly; stale or misspelled active
+entries stop the run instead of silently doing nothing. The extracted candidate
+remains in `02_Raw_Data`, while the accepted correction is added as a separate
+row with `Correction ID`, confidence 1.0, author/date/reason, and its own fact ID.
+Calculated ratios cite that corrected fact ID.
+
+Do not delete an old correction. Mark it `status: superseded` and append a new
+entry with a new ID. Only one active correction may target a given ticker,
+metric, period, and source document. The default overlay is version-controlled;
+use `--corrections <path>` for a different overlay.
 
 The supplied CSE educational documents informed the distinction between the
 income statement, statement of financial position, cash-flow statement, and
@@ -155,7 +185,8 @@ they are never used as company-specific facts.
 1. Architecture and data contracts (complete).
 2. End-to-end pilot for three representative companies, including tests and
    initial Excel/CSV/Markdown output (complete).
-3. Harden extraction strategies and manual corrections from review findings.
+3. Harden extraction strategies and manual corrections from review findings
+   (persistent correction overlay complete; broader extraction hardening ongoing).
 4. Add automatic document discovery and extraction coverage across every current
    constituent returned for the selected industry group.
 

@@ -90,8 +90,14 @@ facts.
 
 ## Manual corrections
 
-The planned correction file is an append-only YAML overlay keyed by company,
-metric, period, and statement scope. Each correction must include the corrected
-value, unit, source document/page, reason, author, and date. Original extracted
-candidates remain intact for auditability.
+`config/corrections.yml` is an append-only YAML overlay keyed by ticker, metric,
+period, and source document. Each correction includes value, reported unit,
+statement scope, source page/text, reason, author, and date. Values are normalized
+through the same unit module as extracted facts. Exact targeting is mandatory;
+an unmatched active entry fails the selected-company run.
+
+Original extracted candidates remain in `02_Raw_Data`. An applied correction is
+a separate confidence-1.0 fact with a unique correction ID, and accepted-fact and
+ratio lineage point to that ID. Replaced entries are retained with
+`status: superseded`; duplicate active targets and duplicate IDs are rejected.
 
