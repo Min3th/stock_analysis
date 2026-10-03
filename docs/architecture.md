@@ -59,6 +59,21 @@ document discovery -> document registry -> content-addressed local cache
   `annualized` and documents the method.
 - Growth comparisons require comparable period durations and bases.
 
+## Debt, cash flow, and return policies
+
+- Total debt is the sum of non-current borrowings, the current portion of
+  long-term borrowings, and short-term interest-bearing borrowings. Lease
+  liabilities are excluded and the selected component rows are retained.
+- Capital expenditure is cash paid for purchase/construction of property, plant,
+  and equipment. Free cash flow is operating cash flow less absolute capex.
+- Net debt is total debt less cash and cash equivalents. When the report defines
+  equivalents as cash at bank plus short-term deposits, both cited rows are used.
+- ROE uses profit attributable to owners and average equity attributable to
+  owners. Total equity is a documented fallback only when attributable equity is
+  unavailable. ROA uses annual net profit and average total assets.
+- Annual return/cash-flow ratios use facts from the same annual report and are
+  not mixed with a newer interim period.
+
 ## Source policy
 
 Official CSE disclosures are preferred, followed by official company investor

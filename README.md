@@ -131,8 +131,10 @@ they are never used as company-specific facts.
   wired into the parser.
 - Current/prior Group values are accepted only when column order is reliable.
   Three-year history remains null when scope cannot be proven.
-- Total debt, capex, retained earnings, dividends, and one-off items often need
-  note-level extraction, which is still pending.
+- Total debt, capex, retained earnings, operating cash flow, free cash flow, ROE,
+  and ROA are extracted/calculated for configured reports with page-level input
+  lineage. Dividend announcements and narrative one-off items still need broader
+  note-level discovery.
 - TTM construction is intentionally not implemented until non-overlapping
   quarters can be validated.
 - Dividend-announcement and automatic financial-document discovery remain part

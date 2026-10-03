@@ -9,11 +9,28 @@ from pathlib import Path
 import httpx
 import yaml
 
-from .calculations.ratios import dividend_yield, payout_ratio, price_earnings, price_to_book
+from .calculations.ratios import (
+    debt_to_equity,
+    divide,
+    dividend_yield,
+    free_cash_flow,
+    net_debt,
+    payout_ratio,
+    price_earnings,
+    price_to_book,
+    roa,
+    roe,
+)
 from .downloaders.http import CachedDownloader, get_market_data
 from .downloaders.universe import CSEUniverseClient
 from .exporters.workbook import export_all
-from .extractors.statements import METRIC_ALIASES, extract_metrics
+from .extractors.statements import (
+    METRIC_ALIASES,
+    extract_cash_equivalents,
+    extract_metrics,
+    extract_retained_earnings_note,
+    extract_total_debt,
+)
 from .parsers.pdf import extract_pages
 from .validators.flags import company_flags
 
@@ -33,6 +50,7 @@ SCREEN_COLUMNS = [
     "ROA",
     "Debt-to-Equity",
     "Net Debt",
+    "Retained Earnings",
     "Operating Cash Flow",
     "Free Cash Flow",
     "OCF / Net Profit",
@@ -71,6 +89,7 @@ def run(
     thresholds = yaml.safe_load((root / "config" / "pipeline.example.yml").read_text())["flags"]
     for issuer in companies:
         facts: dict[str, dict] = {}
+        annual_facts: dict[str, dict] = {}
         document_errors: list[str] = []
         for document in issuer.get("documents", []):
             try:
@@ -79,6 +98,22 @@ def run(
                 )
                 pages = extract_pages(path)
                 extracted = extract_metrics(pages)
+                specialized = (
+                    extract_total_debt(pages),
+                    extract_cash_equivalents(pages),
+                    extract_retained_earnings_note(pages),
+                )
+                for candidate in specialized:
+                    if candidate is None:
+                        continue
+                    existing = next(
+                        (item for item in extracted if item["metric"] == candidate["metric"]), None
+                    )
+                    if existing is None:
+                        extracted.append(candidate)
+                    elif candidate["confidence"] > existing["confidence"]:
+                        extracted.remove(existing)
+                        extracted.append(candidate)
                 doc_id = checksum[:16]
                 sources.append(
                     {
@@ -114,7 +149,10 @@ def run(
                         "Annual/Interim": document["kind"],
                         "Extraction Confidence": fact["confidence"],
                         "Source Text": fact["source_text"],
-                        "Notes": "First matching consolidated-statement candidate; review before investment use.",
+                        "Notes": fact.get(
+                            "notes",
+                            "First matching consolidated-statement candidate; review before investment use.",
+                        ),
                     }
                     raw.append(record)
                     if (
@@ -163,6 +201,17 @@ def run(
                             "period": str(document["period_end"]),
                             "fact_id": record["Fact ID"],
                         }
+                    if document["kind"] == "annual_report":
+                        prior_annual = annual_facts.get(fact["metric"])
+                        if (
+                            prior_annual is None
+                            or str(document["period_end"]) > prior_annual["period"]
+                        ):
+                            annual_facts[fact["metric"]] = {
+                                **fact,
+                                "period": str(document["period_end"]),
+                                "fact_id": record["Fact ID"],
+                            }
             except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
                 document_errors.append(f"{document['title']}: {exc}")
         market = issuer.get("market_data")
@@ -183,6 +232,29 @@ def run(
 
         price = _decimal(market.get("price"))
         eps, bvps, dps = value("eps"), value("bvps"), value("dps")
+
+        def annual_value(key: str, fact_map: dict[str, dict] = annual_facts):
+            return fact_map.get(key, {}).get("value")
+
+        def annual_comparative(key: str, fact_map: dict[str, dict] = annual_facts):
+            fact = fact_map.get(key, {})
+            values = fact.get("comparatives", [])
+            return values[1] * fact.get("multiplier", Decimal(1)) if len(values) >= 2 else None
+
+        equity_metric = (
+            "ordinary_equity" if annual_value("ordinary_equity") is not None else "total_equity"
+        )
+        profit_metric = (
+            "net_profit_attributable"
+            if annual_value("net_profit_attributable") is not None
+            else "net_profit"
+        )
+        ordinary_equity = annual_value(equity_metric)
+        ordinary_equity_previous = annual_comparative(equity_metric)
+        annual_profit_attributable = annual_value(profit_metric)
+        total_debt = annual_value("total_debt")
+        annual_ocf = annual_value("operating_cash_flow")
+        annual_capex = annual_value("capital_expenditure")
         row = {column: None for column in SCREEN_COLUMNS}
         row.update(
             {
@@ -193,7 +265,18 @@ def run(
                 "Revenue": value("revenue"),
                 "Net Profit": value("net_profit"),
                 "EPS": eps,
-                "Operating Cash Flow": value("operating_cash_flow"),
+                "ROE": roe(annual_profit_attributable, ordinary_equity, ordinary_equity_previous),
+                "ROA": roa(
+                    annual_value("net_profit"),
+                    annual_value("total_assets"),
+                    annual_comparative("total_assets"),
+                ),
+                "Debt-to-Equity": debt_to_equity(total_debt, ordinary_equity),
+                "Net Debt": net_debt(total_debt, annual_value("cash")),
+                "Retained Earnings": annual_value("retained_earnings"),
+                "Operating Cash Flow": annual_ocf,
+                "Free Cash Flow": free_cash_flow(annual_ocf, annual_capex),
+                "OCF / Net Profit": divide(annual_ocf, annual_value("net_profit")),
                 "P/E": price_earnings(price, eps),
                 "P/B": price_to_book(price, bvps),
                 "DPS": dps,
@@ -241,6 +324,76 @@ def run(
                         for k, v in facts.items()
                         if k in {x.lower() for x in input_names}
                     ),
+                }
+            )
+        calculation_specs = [
+            (
+                "ROE",
+                row["ROE"],
+                "Net profit attributable / average ordinary equity",
+                annual_profit_attributable,
+                (ordinary_equity + ordinary_equity_previous) / Decimal(2)
+                if ordinary_equity is not None and ordinary_equity_previous is not None
+                else None,
+                (profit_metric, equity_metric),
+            ),
+            (
+                "ROA",
+                row["ROA"],
+                "Net profit / average total assets",
+                annual_value("net_profit"),
+                (annual_value("total_assets") + annual_comparative("total_assets")) / Decimal(2)
+                if annual_value("total_assets") is not None
+                and annual_comparative("total_assets") is not None
+                else None,
+                ("net_profit", "total_assets"),
+            ),
+            (
+                "Debt-to-Equity",
+                row["Debt-to-Equity"],
+                "Total debt / ordinary equity",
+                total_debt,
+                ordinary_equity,
+                ("total_debt", equity_metric),
+            ),
+            (
+                "Net Debt",
+                row["Net Debt"],
+                "Total debt - cash and cash equivalents",
+                total_debt,
+                annual_value("cash"),
+                ("total_debt", "cash"),
+            ),
+            (
+                "Free Cash Flow",
+                row["Free Cash Flow"],
+                "Operating cash flow - absolute capex",
+                annual_ocf,
+                annual_capex,
+                ("operating_cash_flow", "capital_expenditure"),
+            ),
+            (
+                "OCF / Net Profit",
+                row["OCF / Net Profit"],
+                "Operating cash flow / net profit",
+                annual_ocf,
+                annual_value("net_profit"),
+                ("operating_cash_flow", "net_profit"),
+            ),
+        ]
+        for metric, result, formula, numerator, denominator, input_metrics in calculation_specs:
+            input_facts = [annual_facts[name] for name in input_metrics if name in annual_facts]
+            ratios.append(
+                {
+                    "Ticker": issuer["ticker"],
+                    "Metric": metric,
+                    "Value": result,
+                    "Formula": formula,
+                    "Numerator": numerator,
+                    "Denominator": denominator,
+                    "Input Fact IDs": "; ".join(item["fact_id"] for item in input_facts),
+                    "Source Pages": "; ".join(str(item["page"]) for item in input_facts),
+                    "Period Basis": max((item["period"] for item in input_facts), default=None),
                 }
             )
         missing = [metric for metric in METRIC_ALIASES if metric not in facts]
