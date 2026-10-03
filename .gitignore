@@ -1,0 +1,21 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+.env
+
+# Downloaded reports, extracted text, and generated deliverables
+data/raw/**
+!data/raw/.gitkeep
+data/processed/**
+!data/processed/.gitkeep
+reports/**
+!reports/.gitkeep
+manual_review.csv
+
+# Local-only domain references
+Stock-Selection-Desision-Making-English.pdf
+Understanding-Financial-Statements-English.pdf
+

@@ -1,0 +1,21 @@
+sector: Capital Goods
+currency: LKR
+monetary_base_unit: 1
+confidence_threshold: 0.80
+cache_directory: data/raw
+processed_directory: data/processed
+reports_directory: reports
+request_timeout_seconds: 30
+request_delay_seconds: 1.0
+user_agent: cse-capital-goods-screening/0.1
+ocr:
+  enabled: true
+  minimum_text_characters_per_page: 80
+flags:
+  high_debt_to_equity: 2.0
+  ocf_to_net_profit_low: 0.70
+  pe_sector_median_multiple: 2.0
+  pb_sector_median_low_multiple: 0.5
+  pb_sector_median_high_multiple: 2.0
+  low_liquidity_lookback_trading_days: 20
+
