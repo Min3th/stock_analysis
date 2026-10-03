@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -21,17 +21,20 @@ from .calculations.ratios import (
     roa,
     roe,
 )
+from .downloaders.announcements import CSEDividendClient, dividend_type
 from .downloaders.http import CachedDownloader, get_market_data
 from .downloaders.universe import CSEUniverseClient
 from .exporters.workbook import export_all
 from .extractors.statements import (
     METRIC_ALIASES,
     extract_cash_equivalents,
+    extract_interim_flow_metrics,
     extract_metrics,
     extract_retained_earnings_note,
     extract_total_debt,
 )
 from .parsers.pdf import extract_pages
+from .periods import TTM_FLOW_METRICS, ttm_from_annual_and_ytd
 from .validators.flags import company_flags
 
 SCREEN_COLUMNS = [
@@ -85,12 +88,23 @@ def run(
         if not companies:
             raise ValueError(f"Ticker {company!r} is not in the selected CSE industry group")
     downloader = CachedDownloader(root / "data" / "raw")
-    raw, sources, screening, ratios, history, review = [], [], [], [], [], []
+    raw, sources, screening, ratios, history, review, dividends = [], [], [], [], [], [], []
+    dividend_error = None
+    try:
+        dividend_announcements = CSEDividendClient(root / "data" / "raw").latest_for_companies(
+            companies
+        )
+    except (httpx.HTTPError, OSError, ValueError) as exc:
+        dividend_announcements = {}
+        dividend_error = f"CSE dividend announcement feed: {exc}"
     thresholds = yaml.safe_load((root / "config" / "pipeline.example.yml").read_text())["flags"]
     for issuer in companies:
         facts: dict[str, dict] = {}
         annual_facts: dict[str, dict] = {}
+        document_facts: list[tuple[dict, list[dict]]] = []
         document_errors: list[str] = []
+        if dividend_error:
+            document_errors.append(dividend_error)
         for document in issuer.get("documents", []):
             try:
                 path, checksum, cached = downloader.download(
@@ -98,6 +112,15 @@ def run(
                 )
                 pages = extract_pages(path)
                 extracted = extract_metrics(pages)
+                if document["kind"] == "interim_statement":
+                    for candidate in extract_interim_flow_metrics(pages):
+                        existing = next(
+                            (item for item in extracted if item["metric"] == candidate["metric"]),
+                            None,
+                        )
+                        if existing is not None:
+                            extracted.remove(existing)
+                        extracted.append(candidate)
                 specialized = (
                     extract_total_debt(pages),
                     extract_cash_equivalents(pages),
@@ -212,8 +235,70 @@ def run(
                                 "period": str(document["period_end"]),
                                 "fact_id": record["Fact ID"],
                             }
+                document_facts.append((document, extracted))
             except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
                 document_errors.append(f"{document['title']}: {exc}")
+
+        ttm_facts, ttm_rows = _construct_ttm_facts(issuer, annual_facts, document_facts)
+        for metric, fact in ttm_facts.items():
+            facts[metric] = fact
+        ratios.extend(ttm_rows)
+
+        for announcement in dividend_announcements.get(issuer["ticker"], []):
+            base = announcement.get("reqBaseAnnouncement", {})
+            docs = announcement.get("reqAnnouncementDocs", [])
+            source_urls = []
+            for attachment in docs:
+                source_url = (
+                    f"{attachment.get('baseUrl', 'https://cdn.cse.lk/')}{attachment['fileUrl']}"
+                )
+                source_urls.append(source_url)
+                try:
+                    path, checksum, cached = downloader.download(
+                        issuer["ticker"], source_url, attachment.get("fileOriginalName", "Dividend")
+                    )
+                    sources.append(
+                        {
+                            "Company": issuer["name"],
+                            "Ticker": issuer["ticker"],
+                            "Document ID": checksum[:16],
+                            "Document": attachment.get("fileOriginalName")
+                            or attachment.get("fileName"),
+                            "Type": "dividend_announcement",
+                            "Publication Date": base.get("dateOfAnnouncement"),
+                            "Period End": base.get("financialYear"),
+                            "Source URL": source_url,
+                            "Local Path": str(path),
+                            "SHA256": checksum,
+                            "Retrieved UTC": datetime.now(UTC).isoformat(),
+                            "Cache Hit": cached,
+                        }
+                    )
+                except (httpx.HTTPError, OSError, ValueError) as exc:
+                    document_errors.append(f"dividend attachment {source_url}: {exc}")
+            dividends.append(
+                {
+                    "Ticker": issuer["ticker"],
+                    "Company": issuer["name"],
+                    "Announcement ID": base.get("id"),
+                    "Announcement Date": base.get("dateOfAnnouncement"),
+                    "Dividend Type": dividend_type(base),
+                    "Financial Year": base.get("financialYear"),
+                    "Voting DPS": _decimal(base.get("votingDivPerShare")),
+                    "Non-Voting DPS": _decimal(base.get("nonVotingDivPerShare")),
+                    "Shareholder Approval": base.get("shrHolderApproval"),
+                    "AGM Date": base.get("agm"),
+                    "XD Date": base.get("xd"),
+                    "Record Date": datetime.fromtimestamp(base["recordDate"] / 1000, UTC).date()
+                    if base.get("recordDate")
+                    else None,
+                    "Payment Date": base.get("payment"),
+                    "Remarks": base.get("remarks"),
+                    "Source URL": "; ".join(source_urls),
+                    "API Source": f"https://www.cse.lk/api/getAnnouncementById?announcementId={base.get('id')}",
+                    "Detail Cache Hit": announcement.get("_cache_hit"),
+                }
+            )
         market = issuer.get("market_data")
         try:
             if market is None:
@@ -435,7 +520,7 @@ def run(
         raw,
         ratios,
         history,
-        [],
+        dividends,
         sources,
         [{"Ticker": row["Ticker"], "Flags": row["Flags"]} for row in screening],
         review,
@@ -444,6 +529,74 @@ def run(
 
 def _decimal(value) -> Decimal | None:
     return None if value is None else Decimal(str(value))
+
+
+def _construct_ttm_facts(
+    issuer: dict, annual_facts: dict[str, dict], document_facts: list[tuple[dict, list[dict]]]
+) -> tuple[dict[str, dict], list[dict]]:
+    """Build traceable TTM flows only from explicitly described compatible YTD data."""
+    output: dict[str, dict] = {}
+    lineage: list[dict] = []
+    annual_documents = [
+        document for document, _ in document_facts if document["kind"] == "annual_report"
+    ]
+    if not annual_documents:
+        return output, lineage
+    annual_document = max(annual_documents, key=lambda item: str(item["period_end"]))
+    annual_end = date.fromisoformat(str(annual_document["period_end"]))
+    for document, extracted in document_facts:
+        if document["kind"] != "interim_statement" or not document.get("period_months"):
+            continue
+        current_end = date.fromisoformat(str(document["period_end"]))
+        prior_end_value = document.get("comparative_period_end")
+        if not prior_end_value:
+            continue
+        prior_end = date.fromisoformat(str(prior_end_value))
+        months = int(document["period_months"])
+        for current in extracted:
+            metric = current["metric"]
+            annual = annual_facts.get(metric)
+            comparatives = current.get("comparatives", [])
+            if metric not in TTM_FLOW_METRICS or annual is None or len(comparatives) < 2:
+                continue
+            prior_ytd = comparatives[1] * current.get("multiplier", Decimal(1))
+            result = ttm_from_annual_and_ytd(
+                annual["value"],
+                current["value"],
+                prior_ytd,
+                annual_end=annual_end,
+                current_end=current_end,
+                prior_end=prior_end,
+                months=months,
+            )
+            if result is None:
+                continue
+            period = f"TTM ended {current_end.isoformat()}"
+            fact_id = f"{issuer['ticker']}:TTM:{metric}:{current_end.isoformat()}"
+            output[metric] = {
+                **current,
+                "value": result,
+                "period": period,
+                "fact_id": fact_id,
+                "confidence": min(annual["confidence"], current["confidence"]),
+                "notes": "Calculated as latest FY + current YTD - prior comparable YTD.",
+            }
+            lineage.append(
+                {
+                    "Ticker": issuer["ticker"],
+                    "Metric": f"{metric} (TTM)",
+                    "Value": result,
+                    "Formula": "Latest FY + current YTD - prior comparable YTD",
+                    "Numerator": annual["value"],
+                    "Denominator": None,
+                    "Current YTD": current["value"],
+                    "Prior YTD": prior_ytd,
+                    "Input Fact IDs": f"{annual['fact_id']}; interim:{metric}:{current_end.isoformat()}",
+                    "Source Pages": f"{annual['page']}; {current['page']}",
+                    "Period Basis": period,
+                }
+            )
+    return output, lineage
 
 
 def _add_growth_metrics(row: dict, ticker: str, history: list[dict]) -> None:

@@ -96,7 +96,13 @@ def extract_metrics(pages: list[str]) -> list[dict]:
                     values = values[1:]
                 value: Decimal = values[0]
                 is_per_share = metric in {"eps", "bvps", "dps"}
-                multiplier = Decimal(1) if is_per_share else (unit[1] if unit else Decimal(1))
+                inline_unit = detect_unit(cleaned)
+                selected_unit = inline_unit or unit
+                multiplier = (
+                    Decimal(1)
+                    if is_per_share
+                    else (selected_unit[1] if selected_unit else Decimal(1))
+                )
                 # A value already in the billions cannot plausibly be an LKR '000
                 # presentation for this issuer universe; page-level footnotes can
                 # otherwise leak a secondary unit marker into the statement page.
@@ -110,11 +116,13 @@ def extract_metrics(pages: list[str]) -> list[dict]:
                         "unit": "LKR/share" if is_per_share else "LKR",
                         "original_unit": "LKR/share"
                         if is_per_share
-                        else (unit[0] if unit else "unknown"),
+                        else (selected_unit[0] if selected_unit else "unknown"),
                         "multiplier": multiplier,
                         "page": page_number,
                         "source_text": cleaned,
-                        "confidence": Decimal("0.82") if unit or is_per_share else Decimal("0.62"),
+                        "confidence": Decimal("0.82")
+                        if selected_unit or is_per_share
+                        else Decimal("0.62"),
                         "comparatives": values,
                     }
                 )
@@ -176,6 +184,61 @@ def extract_metrics(pages: list[str]) -> list[dict]:
                     }
                 )
                 seen.add("ordinary_equity")
+    return results
+
+
+def extract_interim_flow_metrics(pages: list[str]) -> list[dict]:
+    """Read same-scope current/prior YTD columns from interim primary statements."""
+    aliases = {
+        "revenue": r"\brevenue\b",
+        "operating_profit": r"\b(?:results from operating activities|operating profit)\b",
+        "net_profit": r"\bprofit/?\s*\(?loss\)? for the period\b",
+        "net_profit_attributable": r"\bowners of (?:the )?parent\b",
+        "operating_cash_flow": r"\bnet cash (?:flows? )?(?:generated from|inflow from|used in) operating activities\b",
+        "capital_expenditure": r"\bpurchase (?:and construction )?of property, plant (?:and|&) equipment\b",
+    }
+    results = []
+    seen = set()
+    for page_number, text in enumerate(pages, 1):
+        header = text[:1800].lower()
+        if "unaudited" not in header or not re.search(r"(?:3|03|6|06|9|09) months? to", header):
+            continue
+        unit = detect_unit(text[:2000])
+        for line in text.splitlines():
+            cleaned = " ".join(line.split())
+            for metric, alias in aliases.items():
+                if metric in seen:
+                    continue
+                match = re.search(alias, cleaned, re.IGNORECASE)
+                if not match:
+                    continue
+                values = [parse_number(item) for item in NUMBER.findall(cleaned[match.end() :])]
+                values = [value for value in values if value is not None]
+                if (
+                    len(values) >= 3
+                    and values[0] == values[0].to_integral_value()
+                    and abs(values[0]) <= 200
+                ):
+                    values = values[1:]
+                if len(values) < 2:
+                    continue
+                multiplier = unit[1] if unit else Decimal(1)
+                results.append(
+                    {
+                        "metric": metric,
+                        "value": values[0] * multiplier,
+                        "original_value": values[0],
+                        "unit": "LKR",
+                        "original_unit": unit[0] if unit else "unknown",
+                        "multiplier": multiplier,
+                        "page": page_number,
+                        "source_text": cleaned,
+                        "confidence": Decimal("0.9") if unit else Decimal("0.72"),
+                        "comparatives": values[:2],
+                        "notes": "Interim primary statement; current/prior same-scope columns after row label.",
+                    }
+                )
+                seen.add(metric)
     return results
 
 

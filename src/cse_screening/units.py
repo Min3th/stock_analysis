@@ -24,7 +24,11 @@ UNIT_PATTERNS = (
         "LKR billion",
         Decimal(1000000000),
     ),
-    (re.compile(r"(?:rs\.?|lkr)", re.IGNORECASE), "LKR", Decimal(1)),
+    (
+        re.compile(r"\b(?:rs(?:\.)?|lkr)(?=\s|$|['0-9])", re.IGNORECASE),
+        "LKR",
+        Decimal(1),
+    ),
 )
 
 

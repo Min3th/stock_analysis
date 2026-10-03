@@ -1,6 +1,10 @@
 from decimal import Decimal as D
 
-from cse_screening.extractors.statements import extract_metrics, extract_total_debt
+from cse_screening.extractors.statements import (
+    extract_interim_flow_metrics,
+    extract_metrics,
+    extract_total_debt,
+)
 
 
 def test_eps_extraction_preserves_negative_value():
@@ -25,6 +29,32 @@ def test_note_level_cash_flow_and_retained_earnings():
     assert facts["retained_earnings"]["value"] == D(31555000)
     assert facts["operating_cash_flow"]["value"] == D(1434000)
     assert facts["capital_expenditure"]["value"] == D(-355000)
+
+
+def test_interim_flow_uses_current_and_prior_group_columns_after_label():
+    pages = [
+        (
+            "STATEMENT OF PROFIT OR LOSS\n"
+            "Consolidated Company Consolidated Company\n"
+            "Audited Audited Unaudited Unaudited\n"
+            "Year ended Year ended 3 months to 3 months to\n"
+            "31.03.26 31.03.26 30.06.26 30.06.25\n"
+            "Rs.'000 Rs.'000 Rs.'000 Rs.'000\n"
+            "585,021,102 677,647 Revenue 4 179,324,938 130,363,159 38 184,714 158,920 16\n"
+            "22,222,972 (1,435,851) Profit/ (Loss) for the period 5,922,554 3,177,311 86"
+        )
+    ]
+    facts = {item["metric"]: item for item in extract_interim_flow_metrics(pages)}
+    assert facts["revenue"]["value"] == D(179324938000)
+    assert facts["revenue"]["comparatives"] == [D(179324938), D(130363159)]
+    assert facts["net_profit"]["value"] == D(5922554000)
+
+
+def test_inline_unit_overrides_missing_page_header_unit():
+    pages = ["FINANCIAL HIGHLIGHTS\nRevenue generated Rs. mn 585,021 492,201"]
+    facts = {item["metric"]: item for item in extract_metrics(pages)}
+    assert facts["revenue"]["value"] == D(585021000000)
+    assert facts["revenue"]["original_unit"] == "LKR million"
 
 
 def test_total_debt_sums_current_and_non_current_without_leases():

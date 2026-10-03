@@ -44,7 +44,9 @@ companies:
         url: https://www.hayleys.com/wp-content/uploads/2026/06/Hayleys-PLC-Annual-Report-2025-26.pdf
       - kind: interim_statement
         title: Q1 FY 2026/27
+        period_months: 3
         period_end: 2026-06-30
+        comparative_period_end: 2025-06-30
         publication_date: 2026-08-12
         url: https://www.hayleys.com/wp-content/uploads/2026/08/Hayleys-PLC-FINANCIAL-HIGHLIGHTS-Q1-%E2%80%93-FY2627.pdf
 

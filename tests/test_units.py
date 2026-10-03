@@ -11,5 +11,9 @@ def test_unit_detection_millions():
     assert detect_unit("Amounts in LKR million") == ("LKR million", D(1000000))
 
 
+def test_currency_pattern_does_not_match_owners():
+    assert detect_unit("Owners of the parent 14,051,822") is None
+
+
 def test_parentheses_are_negative():
     assert parse_number("(1,234.50)") == D("-1234.50")

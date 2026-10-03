@@ -53,6 +53,12 @@ document discovery -> document registry -> content-addressed local cache
 
 - Prefer TTM only when four non-overlapping quarterly periods, or compatible
   annual plus comparable YTD periods, can be demonstrated.
+- The annual/YTD bridge is `latest FY + current YTD - matching prior YTD`; every
+  input and source page is retained in `03_Ratios` and the output period is
+  labelled `TTM ended YYYY-MM-DD`.
+- Cash-dividend declarations come from the official CSE corporate-disclosure
+  feed. Declaration DPS remains separate from financial-statement DPS because
+  declaration and accounting periods may differ.
 - Never combine group and company-only columns.
 - Never combine continuing-operations and total-company figures silently.
 - Never annualize a partial period unless an output is explicitly marked

@@ -16,7 +16,9 @@ manual review.
 2. Every raw value retains its document, URL, page, period, unit, confidence,
    extraction method, source text, and notes.
 3. Annual, interim, year-to-date, and trailing-twelve-month periods remain
-   explicit and are never silently mixed or annualized.
+   explicit. TTM is calculated only from four discrete quarters or as latest FY
+   plus current YTD less the matching prior YTD; partial periods are never
+   silently annualized.
 4. Missing or unreliable values remain null and flow into manual review.
 5. Calculated metrics retain their formula and the exact input records used.
 
@@ -46,6 +48,9 @@ python main.py --company ACL.N0000 --period 2026Q3
 
 Downloaded PDFs are cached under `data/raw/<ticker>/`. Rerunning the same URLs
 uses the cached bytes and records a cache hit in `06_Sources`.
+Official CSE cash-dividend announcements are discovered on every run. Their
+structured details are cached under `data/raw/cse_announcements/`, attachments
+under the issuer cache, and results are written to `05_Dividends`.
 
 ## Structure
 
@@ -133,12 +138,15 @@ they are never used as company-specific facts.
   Three-year history remains null when scope cannot be proven.
 - Total debt, capex, retained earnings, operating cash flow, free cash flow, ROE,
   and ROA are extracted/calculated for configured reports with page-level input
-  lineage. Dividend announcements and narrative one-off items still need broader
-  note-level discovery.
-- TTM construction is intentionally not implemented until non-overlapping
-  quarters can be validated.
-- Dividend-announcement and automatic financial-document discovery remain part
-  of the scale-up milestone. Until then, unconfigured tickers are market-data-only.
+  lineage. Narrative one-off items still need broader note-level discovery.
+- TTM construction requires explicit `period_months` and
+  `comparative_period_end` metadata and compatible current/prior YTD columns.
+  It returns null rather than estimating when that evidence is absent.
+- The CSE corporate-disclosure feed supplies its current announcement window,
+  not a guaranteed complete historical archive. The pipeline collects all cash
+  dividends in that feed matching the selected universe and caches their PDFs.
+- Automatic financial-document discovery remains part of the scale-up milestone.
+  Until then, unconfigured tickers are market-data-only.
 - CSE's public market endpoint is operational but undocumented; failures become
   review items rather than silent gaps.
 
