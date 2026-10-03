@@ -3,10 +3,9 @@
 A reusable, traceable Python pipeline for quarterly screening of Colombo Stock
 Exchange companies in the Capital Goods industry group.
 
-This repository is being delivered in independently working milestones. The
-current milestone establishes the architecture, data contracts, configuration,
-and engineering risk register. It intentionally contains no company-specific
-financial values yet.
+The working pilot processes Access Engineering, ACL Cables, and Hayleys using
+official investor-relations reports plus current CSE market data. Extraction is
+deliberately conservative: incomplete fields are exported to manual review.
 
 ## Design priorities
 
@@ -18,15 +17,31 @@ financial values yet.
 4. Missing or unreliable values remain null and flow into manual review.
 5. Calculated metrics retain their formula and the exact input records used.
 
-## Planned command line
+## Setup
+
+Python 3.11 or later is required.
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
+```
+
+OCR is optional and is not invoked unless a page fails the text-density test:
+
+```powershell
+python -m pip install -e ".[ocr]"
+```
+
+## Command line
 
 ```powershell
 python main.py --sector "Capital Goods" --period 2026Q3
-python main.py --company HHL.N0000 --period 2026Q3
+python main.py --company ACL.N0000 --period 2026Q3
 ```
 
-The CLI becomes executable in milestone 2, after document discovery and the
-first representative-company adapters are implemented.
+Downloaded PDFs are cached under `data/raw/<ticker>/`. Rerunning the same URLs
+uses the cached bytes and records a cache hit in `06_Sources`.
 
 ## Structure
 
@@ -62,11 +77,56 @@ They must never be treated as sources for company-specific values. Actual
 figures must come from current official CSE disclosures or company investor
 relations documents.
 
+## Company configuration
+
+Edit `config/companies.yml`. Each entry records the ticker, official CSE profile,
+date-stamped classification source, and official document URLs. The example file
+is safe to copy when creating another universe. Do not put extracted financial
+values in configuration; facts must originate from source documents.
+
+The official CSE sector-statistics report dated 25 September 2026 reports 30
+listed Capital Goods securities. The pilot does not assert a full 28- or
+30-company constituent list; that must be obtained from a date-stamped official
+classification source before the expansion milestone.
+
+## Extraction and review
+
+PDF pages are retained as page-numbered text. Statement headings narrow the
+search area, metric aliases produce candidates, reported units are normalized to
+base LKR, and note references are separated from values. The workbook preserves
+original value/unit/text and the normalized result. Low-confidence or absent
+facts appear in `reports/manual_review.csv` rather than being guessed.
+
+For a manual correction, first verify the consolidated/group column and period
+in the cited PDF. Record the candidate and reason in the review file; the planned
+next hardening step is an append-only YAML correction overlay so corrections
+remain reproducible without changing source evidence.
+
+The supplied CSE educational documents informed the distinction between the
+income statement, statement of financial position, cash-flow statement, and
+per-share/valuation measures. Their formulas and terminology guide extraction;
+they are never used as company-specific facts.
+
+## Known limitations
+
+- The pilot extractor handles text PDFs; OCR fallback is configured but not yet
+  wired into the parser.
+- Current/prior Group values are accepted only when column order is reliable.
+  Three-year history remains null when scope cannot be proven.
+- Total debt, capex, retained earnings, dividends, and one-off items often need
+  note-level extraction, which is still pending.
+- TTM construction is intentionally not implemented until non-overlapping
+  quarters can be validated.
+- Dividend-announcement discovery and the complete sector universe remain part
+  of the scale-up milestone.
+- CSE's public market endpoint is operational but undocumented; failures become
+  review items rather than silent gaps.
+
 ## Milestone plan
 
-1. Architecture and data contracts (current milestone).
-2. End-to-end pipeline for 2–3 representative companies, including tests and
-   initial Excel/CSV/Markdown output.
+1. Architecture and data contracts (complete).
+2. End-to-end pilot for three representative companies, including tests and
+   initial Excel/CSV/Markdown output (complete).
 3. Harden extraction strategies and manual corrections from review findings.
 4. Expand the configurable universe to all current Capital Goods companies.
 

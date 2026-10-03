@@ -1,2 +1,1 @@
 """Financial fact candidate extraction."""
-

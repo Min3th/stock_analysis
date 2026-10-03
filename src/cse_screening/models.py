@@ -85,7 +85,7 @@ class RawFact(BaseModel):
     normalized_unit: str
     original_value: Decimal | None = None
     original_unit: str | None = None
-    scale_multiplier: Decimal = Decimal("1")
+    scale_multiplier: Decimal = Decimal(1)
     document_id: str
     source_url: HttpUrl
     page_number: int = Field(ge=1)
@@ -127,4 +127,3 @@ class ManualReviewItem(BaseModel):
     source_page: int
     source_text: str
     reason: str
-

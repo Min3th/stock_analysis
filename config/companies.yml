@@ -1,5 +1,3 @@
-# The current universe will be verified against official CSE classifications in
-# milestone 2. Copy this file to companies.yml and add/remove entries as needed.
 companies:
   - ticker: AEL.N0000
     name: ACCESS ENGINEERING PLC
@@ -47,4 +45,3 @@ companies:
         period_end: 2026-06-30
         publication_date: 2026-08-12
         url: https://www.hayleys.com/wp-content/uploads/2026/08/Hayleys-PLC-FINANCIAL-HIGHLIGHTS-Q1-%E2%80%93-FY2627.pdf
-
