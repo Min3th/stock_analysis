@@ -49,7 +49,14 @@ FINANCIAL_COLUMNS = {
     "Current YTD",
     "Prior YTD",
 }
-PER_SHARE_COLUMNS = {"Current Price", "EPS", "DPS", "Voting DPS", "Non-Voting DPS"}
+PER_SHARE_COLUMNS = {
+    "Current Price",
+    "EPS",
+    "DPS",
+    "Book Value Per Share",
+    "Voting DPS",
+    "Non-Voting DPS",
+}
 INTEGER_COLUMNS = {
     "Ordinary Shares Outstanding",
     "Recent Volume",

@@ -11,12 +11,34 @@ def _threshold(settings: dict, name: str, default: str) -> Decimal:
 
 
 def consecutive_decline(history: list[dict], ticker: str, metric: str) -> bool:
-    """Return true only when the latest three distinct annual values decline twice."""
-    observations = {
-        str(item["Financial Year End"]): item["Value"]
-        for item in history
-        if item["Ticker"] == ticker and item["Metric"] == metric
-    }
+    """Return true when the metric fell in each of the latest two financial years.
+
+    Each year is compared with the comparative printed in the same report, so a
+    share split or restatement between reports is not mistaken for a decline.
+    Observations without report provenance fall back to one value per year.
+    """
+    rows = [item for item in history if item["Ticker"] == ticker and item["Metric"] == metric]
+    if rows and all(item.get("Source Period End") for item in rows):
+        pairs = {}
+        for item in rows:
+            pairs.setdefault(str(item["Source Period End"]), {})[
+                str(item["Financial Year End"])
+            ] = item["Value"]
+        reports = sorted(pairs, reverse=True)
+        if len(reports) < 2:
+            return False
+        latest, middle = reports[0], reports[1]
+        if int(latest[:4]) - int(middle[:4]) != 1 or latest[4:] != middle[4:]:
+            return False
+        declines = []
+        for report in (latest, middle):
+            prior = f"{int(report[:4]) - 1}{report[4:]}"
+            current, previous = pairs[report].get(report), pairs[report].get(prior)
+            if current is None or previous is None:
+                return False
+            declines.append(current < previous)
+        return all(declines)
+    observations = {str(item["Financial Year End"]): item["Value"] for item in rows}
     ordered = sorted(observations.items(), reverse=True)
     if len(ordered) < 3:
         return False
