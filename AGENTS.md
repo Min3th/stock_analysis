@@ -41,12 +41,13 @@ main.py                              CLI entry point
 config/companies.yml                universe overlay and document fallbacks
 config/corrections.yml              persistent, append-only fact corrections
 config/pipeline.example.yml         default settings and thresholds
+config/pipeline.yml                 optional local overrides of those defaults
 src/cse_screening/pipeline.py       top-level orchestration
 src/cse_screening/models.py         core data contracts
 src/cse_screening/downloaders/      CSE APIs, discovery, caching, market data
 src/cse_screening/parsers/          native PDF text, tables, and OCR fallbacks
-src/cse_screening/extractors/       metric candidates and statement extraction
-src/cse_screening/calculations/     ratios, growth, TTM, and lineage
+src/cse_screening/extractors/       statement location, column layout, metric candidates
+src/cse_screening/calculations/     period-safe fact selection, ratios, and lineage
 src/cse_screening/validators/       fact validation and anomaly rules
 src/cse_screening/exporters/        workbook, CSV, Markdown, and review outputs
 tests/                              unit and fixture-based regression tests
@@ -76,9 +77,16 @@ it in exporters.
   durations, or incompatible fiscal year-ends.
 - Preserve negative EPS, equity, profit, and cash flow. A reliable negative
   value is data, not an extraction failure.
-- Ratios must retain formula text and input fact IDs. ROE should use profit
-  attributable to ordinary shareholders and average attributable equity where
-  available. TTM may only use compatible, explicitly identified periods.
+- Ratios must retain formula text, input fact IDs and a period basis. ROE should
+  use profit attributable to ordinary shareholders and average attributable
+  equity where available. TTM may only use compatible, explicitly identified
+  periods.
+- Facts below `confidence_threshold` must not reach the screening table. Add a
+  reconciliation or lower the confidence of a doubtful extraction; never raise
+  a confidence to fill a cell.
+- The screening row is assembled only in `calculations/screening.py`. Balance
+  sheet values come from the latest annual report; flows are TTM or latest FY,
+  never a bare interim value, and inputs to one ratio share one period.
 - Manual corrections are separate facts with complete provenance. Never erase
   the original candidate. Supersede old corrections instead of deleting them.
 - Anomaly output is descriptive evidence only. Do not rank companies, assign a
@@ -157,6 +165,11 @@ regression-sensitive:
 - Automatic CSE annual/interim discovery, dividend announcements, caching, and
   full-universe processing.
 - Native PDF text extraction with table and page-level OCR fallbacks.
+- Primary-statement location and header-driven column selection (Group or
+  Company first, year order, restated and % change columns, nil cells), with
+  the document-wide label scan kept only as a low-confidence fallback.
+- Per-share reconciliation, the confidence gate, and the CSE-implied share
+  count fallback for single-class issuers.
 - Core statement metrics including operating profit, EBIT, ordinary shares,
   debt, capex, free cash flow, retained earnings, and attributable values.
 - Period-safe TTM, reliable annual history/CAGR rules, ratio lineage, and
@@ -173,9 +186,17 @@ with tests and current code before extending it.
 ## Known improvement areas
 
 Use the `Known limitations` section of `README.md` as the authoritative current
-list. Typical next work includes broader real-report fixtures, stronger
-statement/table column disambiguation, more accounting validations, expanded OCR
-coverage, company-IR fallback discovery, and longer liquidity histories.
+list. The extraction has been checked against accounting identities on the
+cached text of the Capital Goods filings, not by hand against the PDFs. Typical
+next work includes manual spot-checks recorded as fixtures, half-year and
+nine-month interim filings, financial-year DPS from dividend announcements,
+statement rows for financial-sector groups, expanded OCR coverage, company-IR
+fallback discovery, and longer liquidity histories.
+
+A useful regression check for extraction changes is to rerun a sector from the
+cached page text and compare the screening CSV before and after; a change that
+breaks `assets = liabilities + equity` or `EPS x shares ~ attributable profit`
+for an issuer that previously reconciled is a regression.
 
 When addressing a limitation, prefer a general rule backed by multiple layouts
 over a ticker-specific parser. If an issuer exception is unavoidable, isolate
