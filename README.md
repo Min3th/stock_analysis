@@ -60,6 +60,14 @@ Each run also writes `reports/extraction_warnings.jsonl`. This machine-readable
 log mirrors missing, low-confidence, validation, and document-error records from
 `manual_review.csv`.
 
+The Markdown summary reports processing confidence, sector medians, missing
+fields by ticker, neutral highest/lowest observed values, anomaly counts, and
+grouped extraction warnings. It does not rank or recommend companies. Excel
+outputs use separate formats for LKR amounts, per-share values, whole-share and
+volume counts, ratios, and percentages; negatives use red parentheses, while
+conditional formatting highlights negative financial results and populated flag
+cells.
+
 ## Structure
 
 ```text
