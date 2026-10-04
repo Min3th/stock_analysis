@@ -9,7 +9,11 @@ from ..units import detect_unit, parse_number
 
 METRIC_ALIASES = {
     "revenue": (r"^revenue(?! reserves)\b", r"^turnover\b"),
-    "operating_profit": (r"^profit from operations\b", r"^operating profit\b"),
+    "operating_profit": (
+        r"^profit from operations\b",
+        r"^operating profit\b",
+        r"^results from operating activities\b",
+    ),
     "ebit": (
         r"^earnings before interest (?:and|&) tax(?:\s*\(ebit\))?\b",
         r"^profit before interest (?:and|&) tax\b",
@@ -55,6 +59,7 @@ def candidate_pages(pages: list[str]) -> list[tuple[int, str]]:
         "statement of financial position",
         "statement of cash flows",
         "financial highlights",
+        "results from operating activities",
     )
     selected = [
         (i, text) for i, text in enumerate(pages, 1) if any(h in text.lower() for h in headings)
@@ -370,7 +375,35 @@ def extract_ordinary_shares(pages: list[str]) -> dict | None:
     fallback = (
         r"weighted average number of ordinary shares(?: in issue| outstanding)?",
         r"weighted-average number of ordinary shares",
+        r"weighted average no\.?\s*of ordinary shares",
     )
+
+    # Some reports disclose the period-end count in narrative stated-capital text,
+    # with the number before the words "ordinary shares". Keep these explicit
+    # patterns ahead of the weighted-average EPS denominator fallback.
+    narrative_patterns = (
+        r"represented by\s+([\d,]+)\s+ordinary shares",
+        r"stated capital\s*\(([\d,]+)\s+shares\)",
+    )
+    for page_number, text in enumerate(pages, 1):
+        flattened = " ".join(text.split())
+        for pattern in narrative_patterns:
+            match = re.search(pattern, flattened, re.IGNORECASE)
+            if match and (value := parse_number(match.group(1))) is not None:
+                return {
+                    "metric": "ordinary_shares_outstanding",
+                    "value": value,
+                    "original_value": value,
+                    "unit": "shares",
+                    "original_unit": "shares",
+                    "multiplier": Decimal(1),
+                    "page": page_number,
+                    "source_text": match.group(0),
+                    "confidence": Decimal("0.90"),
+                    "comparatives": [value],
+                    "notes": "Period-end ordinary shares from stated-capital disclosure.",
+                }
+
     for patterns, confidence, method, note in (
         (primary, Decimal("0.90"), "period_end_share_count", "Period-end ordinary shares."),
         (
@@ -381,8 +414,11 @@ def extract_ordinary_shares(pages: list[str]) -> dict | None:
         ),
     ):
         for page_number, text in enumerate(pages, 1):
-            for line in text.splitlines():
-                cleaned = " ".join(line.split())
+            lines = text.splitlines()
+            for index, line in enumerate(lines):
+                # PDF table labels frequently wrap across two or three physical
+                # lines, with the values appearing only on the final line.
+                cleaned = " ".join(" ".join(lines[index : index + 3]).split())
                 match = next(
                     (
                         result

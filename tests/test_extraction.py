@@ -85,6 +85,18 @@ def test_explicit_ebit_extraction():
     assert facts["ebit"]["value"] == D(6732000)
 
 
+def test_results_from_operating_activities_is_operating_profit():
+    pages = [
+        (
+            "STATEMENT OF PROFIT OR LOSS\n"
+            "(In Thousands of Rupees)\n"
+            "Results from operating activities 2,526,504 (1,463,340)"
+        )
+    ]
+    facts = {item["metric"]: item for item in extract_metrics(pages)}
+    assert facts["operating_profit"]["value"] == D(2526504000)
+
+
 def test_period_end_ordinary_shares_preferred_and_normalized():
     pages = [
         (
@@ -102,6 +114,27 @@ def test_weighted_average_shares_is_explicit_fallback():
     fact = extract_ordinary_shares(pages)
     assert fact["value"] == D(212625000)
     assert fact["confidence"] == D("0.78")
+
+
+def test_wrapped_weighted_average_share_label_is_extracted():
+    pages = [
+        (
+            "Weighted average number of ordinary shares in\n"
+            "issue applicable to basic earnings per share 6,000,000 6,000,000"
+        )
+    ]
+    fact = extract_ordinary_shares(pages)
+    assert fact["value"] == D(6000000)
+    assert fact["confidence"] == D("0.78")
+
+
+def test_narrative_period_end_share_count_precedes_label():
+    pages = [
+        "The Stated Capital was Rs. 1,368,673,373 represented by\n1,107,893,840 Ordinary Shares."
+    ]
+    fact = extract_ordinary_shares(pages)
+    assert fact["value"] == D(1107893840)
+    assert fact["confidence"] == D("0.90")
 
 
 def test_total_debt_sums_current_and_non_current_without_leases():
