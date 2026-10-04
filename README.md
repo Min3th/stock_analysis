@@ -190,13 +190,17 @@ they are never used as company-specific facts.
 - The pilot extractor handles text PDFs; OCR fallback is configured but not yet
   wired into the parser.
 - Current/prior Group values are accepted only when column order is reliable.
-  Three-year history remains null when scope cannot be proven.
+  History and CAGR remain null when three consecutive, matching fiscal year-ends
+  cannot be proven or when CAGR is mathematically undefined for negative values.
 - Validation is intentionally conservative and does not prove that a value is
   correct. Holding-company presentations and unusual classifications can trigger
   review even when reported correctly; use the cited page and correction overlay
   to resolve those cases.
-- Automatic discovery selects one latest annual and one latest interim report
-  per issuer. Errata, prospectuses, trust deeds, articles, and accountants'
+- Automatic discovery selects the latest three distinct annual periods and the
+  latest interim report per issuer. Overlapping annual comparatives are
+  deduplicated in favor of the directly reported current-year observation, while
+  preserving source period, value basis, page, and confidence in `04_History`.
+  Errata, prospectuses, trust deeds, articles, and accountants'
   reports are excluded; unusual CSE titles that contain no recognizable period
   are left unmatched rather than guessed.
 - Total debt, capex, retained earnings, operating cash flow, free cash flow, ROE,

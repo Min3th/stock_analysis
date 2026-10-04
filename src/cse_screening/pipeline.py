@@ -258,7 +258,7 @@ def run(
                         }
                         and fact["confidence"] >= Decimal("0.8")
                     ):
-                        year = document["period_end"].year
+                        period_end = document["period_end"]
                         if fact.get("correction_id"):
                             history[:] = [
                                 item
@@ -266,7 +266,7 @@ def run(
                                 if not (
                                     item["Ticker"] == issuer["ticker"]
                                     and item["Metric"] == fact["metric"]
-                                    and item["Financial Year End"] == f"{year}-03-31"
+                                    and item["Financial Year End"] == str(period_end)
                                 )
                             ]
                         # Later columns may switch from Group to Company scope.
@@ -276,11 +276,12 @@ def run(
                         ) * Decimal("0.01"):
                             comparable_values = comparable_values[:1]
                         for offset, historical_value in enumerate(comparable_values):
+                            historical_period = _prior_year_end(period_end, offset)
                             history.append(
                                 {
                                     "Ticker": issuer["ticker"],
                                     "Company": issuer["name"],
-                                    "Financial Year End": f"{year - offset}-03-31",
+                                    "Financial Year End": str(historical_period),
                                     "Metric": fact["metric"],
                                     "Value": historical_value * fact["multiplier"],
                                     "Unit": fact["unit"],
@@ -288,6 +289,11 @@ def run(
                                     "Source URL": document["url"],
                                     "Source Page": fact["page"],
                                     "Confidence": fact["confidence"],
+                                    "Value Basis": "reported current"
+                                    if offset == 0
+                                    else "reported comparative",
+                                    "Source Period End": str(period_end),
+                                    "Correction ID": fact.get("correction_id"),
                                 }
                             )
                     # Latest documents win; low-confidence candidates do not silently replace stronger facts.
@@ -634,6 +640,7 @@ def run(
             "Active corrections did not match a configured document exactly: "
             + ", ".join(map(str, unapplied))
         )
+    history[:] = _deduplicate_history(history)
     return export_all(
         period,
         group["industry_group"],
@@ -653,25 +660,66 @@ def _decimal(value) -> Decimal | None:
     return None if value is None else Decimal(str(value))
 
 
+def _prior_year_end(period_end: date, offset: int) -> date:
+    try:
+        return period_end.replace(year=period_end.year - offset)
+    except ValueError:
+        return period_end.replace(year=period_end.year - offset, day=28)
+
+
+def _deduplicate_history(rows: list[dict]) -> list[dict]:
+    """Prefer direct current-year observations over overlapping comparatives."""
+    selected = {}
+    for row in rows:
+        key = (row["Ticker"], row["Metric"], row["Financial Year End"])
+        rank = (
+            bool(row.get("Correction ID")),
+            row.get("Value Basis") == "reported current",
+            str(row.get("Source Period End") or ""),
+            row.get("Confidence", Decimal(0)),
+        )
+        prior = selected.get(key)
+        if prior is None:
+            selected[key] = row
+            continue
+        prior_rank = (
+            bool(prior.get("Correction ID")),
+            prior.get("Value Basis") == "reported current",
+            str(prior.get("Source Period End") or ""),
+            prior.get("Confidence", Decimal(0)),
+        )
+        if rank > prior_rank:
+            selected[key] = row
+    return sorted(
+        selected.values(),
+        key=lambda item: (item["Ticker"], item["Metric"], item["Financial Year End"]),
+        reverse=True,
+    )
+
+
 def _merge_documents(discovered: list[dict], configured: list[dict]) -> list[dict]:
-    """Prefer the latest period per kind while retaining configured fallbacks."""
+    """Retain three annual periods and the latest interim, preferring official discovery."""
     unique = {}
     for document in [*configured, *discovered]:
         unique[document["url"]] = document
     selected = []
     for kind in ("annual_report", "interim_statement"):
         candidates = [item for item in unique.values() if item["kind"] == kind]
-        if candidates:
-            selected.append(
-                max(
-                    candidates,
-                    key=lambda item: (
-                        str(item.get("period_end") or ""),
-                        str(item.get("publication_date") or ""),
-                        bool(item.get("discovery_url")),
-                    ),
-                )
+        limit = 3 if kind == "annual_report" else 1
+        by_period = {}
+        for item in candidates:
+            key = str(item.get("period_end") or "")
+            prior = by_period.get(key)
+            rank = (
+                str(item.get("publication_date") or ""),
+                bool(item.get("discovery_url")),
             )
+            if prior is None or rank > (
+                str(prior.get("publication_date") or ""),
+                bool(prior.get("discovery_url")),
+            ):
+                by_period[key] = item
+        selected.extend(by_period[key] for key in sorted(by_period, reverse=True)[:limit])
     return selected
 
 
@@ -746,16 +794,35 @@ def _construct_ttm_facts(
 def _add_growth_metrics(row: dict, ticker: str, history: list[dict]) -> None:
     from .calculations.ratios import cagr, growth
 
-    def values(metric: str) -> list[Decimal]:
-        return [
-            item["Value"]
-            for item in history
-            if item["Ticker"] == ticker and item["Metric"] == metric
-        ]
+    def series(metric: str) -> list[dict]:
+        return sorted(
+            (
+                item
+                for item in _deduplicate_history(history)
+                if item["Ticker"] == ticker and item["Metric"] == metric
+            ),
+            key=lambda item: item["Financial Year End"],
+            reverse=True,
+        )
 
-    revenues, eps_values, profits = values("revenue"), values("eps"), values("net_profit")
-    row["Revenue Growth YoY"] = growth(*revenues[:2]) if len(revenues) >= 2 else None
-    row["EPS Growth YoY"] = growth(*eps_values[:2]) if len(eps_values) >= 2 else None
-    row["Net Profit Growth YoY"] = growth(*profits[:2]) if len(profits) >= 2 else None
-    row["3Y Revenue CAGR"] = cagr(revenues[0], revenues[2], 2) if len(revenues) >= 3 else None
-    row["3Y EPS CAGR"] = cagr(eps_values[0], eps_values[2], 2) if len(eps_values) >= 3 else None
+    def valid_cagr(items: list[dict]) -> Decimal | None:
+        if len(items) < 3:
+            return None
+        end = date.fromisoformat(items[0]["Financial Year End"])
+        start = date.fromisoformat(items[2]["Financial Year End"])
+        if (end.month, end.day) != (start.month, start.day) or end.year - start.year != 2:
+            return None
+        return cagr(items[0]["Value"], items[2]["Value"], 2)
+
+    revenues, eps_values, profits = series("revenue"), series("eps"), series("net_profit")
+    row["Revenue Growth YoY"] = (
+        growth(revenues[0]["Value"], revenues[1]["Value"]) if len(revenues) >= 2 else None
+    )
+    row["EPS Growth YoY"] = (
+        growth(eps_values[0]["Value"], eps_values[1]["Value"]) if len(eps_values) >= 2 else None
+    )
+    row["Net Profit Growth YoY"] = (
+        growth(profits[0]["Value"], profits[1]["Value"]) if len(profits) >= 2 else None
+    )
+    row["3Y Revenue CAGR"] = valid_cagr(revenues)
+    row["3Y EPS CAGR"] = valid_cagr(eps_values)

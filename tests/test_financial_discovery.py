@@ -61,6 +61,7 @@ def test_discovery_selects_latest_annual_and_interim_for_all_share_classes(
         "annual_report",
         "interim_statement",
     }
+    assert len([item for item in found["RHL.N0000"] if item["kind"] == "annual_report"]) == 2
     interim = next(item for item in found["RHL.X0000"] if item["kind"] == "interim_statement")
     assert interim["period_months"] == 3
     assert interim["comparative_period_end"] == date(2025, 6, 30)

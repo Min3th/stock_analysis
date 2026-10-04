@@ -65,12 +65,19 @@ def normalize_monetary(value: Decimal | None, unit_text: str) -> Decimal | None:
 
 
 def parse_number(text: str) -> Decimal | None:
-    value = text.strip().replace(",", "").replace(" ", "")
+    value = text.strip().replace(" ", "")
     if value in {"", "-", "—", "–", "N/A", "NA"}:
         return None
     negative = value.startswith("(") and value.endswith(")")
     if negative:
         value = value[1:-1]
+    # PDF text occasionally substitutes a comma for a decimal point. A single
+    # comma followed by one or two digits is not a valid thousands grouping,
+    # so it can be repaired without changing correctly grouped values.
+    if re.fullmatch(r"-?\d+,\d{1,2}", value):
+        value = value.replace(",", ".")
+    else:
+        value = value.replace(",", "")
     value = re.sub(r"[^0-9.\-]", "", value)
     if not value or value in {"-", "."}:
         return None

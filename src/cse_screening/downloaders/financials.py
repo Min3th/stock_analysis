@@ -162,19 +162,35 @@ class CSEFinancialDocumentClient:
     @staticmethod
     def _latest_documents(rows: list[dict]) -> list[dict]:
         selected = []
-        for kind in ("annual_report", "interim_statement"):
-            choices = [item for item in rows if item["kind"] == kind]
-            if not choices:
-                continue
-            chosen = max(
-                choices,
-                key=lambda item: (
-                    item["period_end"],
-                    item["publication_date"] or date.min,
-                    "amended" in item["title"].casefold() or "updated" in item["title"].casefold(),
-                ),
+        annuals = [item for item in rows if item["kind"] == "annual_report"]
+        # Keep one preferred filing for each of the latest three fiscal years.
+        # Comparative columns then provide an independently sourced fourth point
+        # where layouts permit, while CAGR only needs three verified observations.
+        annual_by_period = {}
+        for item in annuals:
+            key = item["period_end"]
+            prior = annual_by_period.get(key)
+            rank = (
+                item["publication_date"] or date.min,
+                "amended" in item["title"].casefold() or "updated" in item["title"].casefold(),
             )
-            selected.append(chosen)
+            if prior is None or rank > (
+                prior["publication_date"] or date.min,
+                "amended" in prior["title"].casefold() or "updated" in prior["title"].casefold(),
+            ):
+                annual_by_period[key] = item
+        selected.extend(annual_by_period[key] for key in sorted(annual_by_period, reverse=True)[:3])
+        interims = [item for item in rows if item["kind"] == "interim_statement"]
+        if interims:
+            selected.append(
+                max(
+                    interims,
+                    key=lambda item: (
+                        item["period_end"],
+                        item["publication_date"] or date.min,
+                    ),
+                )
+            )
         annual = next((item for item in selected if item["kind"] == "annual_report"), None)
         interim = next((item for item in selected if item["kind"] == "interim_statement"), None)
         if annual and interim:
