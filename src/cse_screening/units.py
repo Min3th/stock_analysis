@@ -5,7 +5,11 @@ from decimal import Decimal
 
 UNIT_PATTERNS = (
     (
-        re.compile(r"(?:sri\s+lanka\s+)?rupees?\s+(?:in\s+)?thousands?", re.IGNORECASE),
+        re.compile(
+            r"(?:(?:sri\s+lanka\s+)?rupees?\s+(?:in\s+)?thousands?|"
+            r"(?:in\s+)?thousands?\s+of\s+(?:rs\.?|rupees?|lkr))",
+            re.IGNORECASE,
+        ),
         "LKR '000",
         Decimal(1000),
     ),
@@ -35,10 +39,19 @@ UNIT_PATTERNS = (
 def detect_unit(text: str) -> tuple[str, Decimal] | None:
     # Prefer explicit million/billion declarations over generic '000 text that
     # may occur elsewhere on a dense report page.
-    for index in (0, 2, 3, 1, 4):
+    for index in (0, 2, 3):
         pattern, unit, multiplier = UNIT_PATTERNS[index]
         if pattern.search(text):
             return unit, multiplier
+    explicit_thousands = re.compile(
+        r"(?:(?:rs\.?|lkr)\s*(?:in\s*)?['‘’]?000s?|['‘’]000s?|\b000s\b)",
+        re.IGNORECASE,
+    )
+    if explicit_thousands.search(text):
+        return "LKR '000", Decimal(1000)
+    pattern, unit, multiplier = UNIT_PATTERNS[4]
+    if pattern.search(text):
+        return unit, multiplier
     return None
 
 

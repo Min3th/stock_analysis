@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import httpx
 import yaml
@@ -23,6 +24,7 @@ from .calculations.ratios import (
 )
 from .corrections import correction_candidates, load_corrections
 from .downloaders.announcements import CSEDividendClient, dividend_type
+from .downloaders.financials import CSEFinancialDocumentClient
 from .downloaders.http import CachedDownloader, get_market_data
 from .downloaders.universe import CSEUniverseClient
 from .exporters.workbook import export_all
@@ -95,6 +97,18 @@ def run(
         correction_path = root / correction_path
     corrections = load_corrections(correction_path)
     applied_corrections: set[str] = set()
+    financial_discovery_error = None
+    financial_feed_cached = False
+    try:
+        discovered, financial_feed_cached = CSEFinancialDocumentClient(
+            root / "data" / "raw"
+        ).discover(companies, datetime.now(ZoneInfo("Asia/Colombo")).date())
+        for issuer in companies:
+            issuer["documents"] = _merge_documents(
+                discovered.get(issuer["ticker"], []), issuer.get("documents", [])
+            )
+    except (httpx.HTTPError, OSError, TypeError, ValueError) as exc:
+        financial_discovery_error = f"CSE financial filing discovery: {exc}"
     downloader = CachedDownloader(root / "data" / "raw")
     raw, sources, screening, ratios, history, review, dividends = [], [], [], [], [], [], []
     dividend_error = None
@@ -111,6 +125,8 @@ def run(
         annual_facts: dict[str, dict] = {}
         document_facts: list[tuple[dict, list[dict]]] = []
         document_errors: list[str] = []
+        if financial_discovery_error:
+            document_errors.append(financial_discovery_error)
         if dividend_error:
             document_errors.append(dividend_error)
         for document in issuer.get("documents", []):
@@ -159,10 +175,15 @@ def run(
                         "Publication Date": document["publication_date"],
                         "Period End": document["period_end"],
                         "Source URL": document["url"],
+                        "Discovery URL": document.get("discovery_url"),
+                        "Announcement ID": document.get("announcement_id"),
                         "Local Path": str(path),
                         "SHA256": checksum,
                         "Retrieved UTC": datetime.now(UTC).isoformat(),
                         "Cache Hit": cached,
+                        "Discovery Cache Hit": financial_feed_cached
+                        if document.get("discovery_url")
+                        else None,
                     }
                 )
                 for fact in extracted:
@@ -568,6 +589,28 @@ def run(
 
 def _decimal(value) -> Decimal | None:
     return None if value is None else Decimal(str(value))
+
+
+def _merge_documents(discovered: list[dict], configured: list[dict]) -> list[dict]:
+    """Prefer the latest period per kind while retaining configured fallbacks."""
+    unique = {}
+    for document in [*configured, *discovered]:
+        unique[document["url"]] = document
+    selected = []
+    for kind in ("annual_report", "interim_statement"):
+        candidates = [item for item in unique.values() if item["kind"] == kind]
+        if candidates:
+            selected.append(
+                max(
+                    candidates,
+                    key=lambda item: (
+                        str(item.get("period_end") or ""),
+                        str(item.get("publication_date") or ""),
+                        bool(item.get("discovery_url")),
+                    ),
+                )
+            )
+    return selected
 
 
 def _construct_ttm_facts(

@@ -8,7 +8,7 @@ from decimal import Decimal
 from ..units import detect_unit, parse_number
 
 METRIC_ALIASES = {
-    "revenue": (r"^revenue\b", r"^turnover\b"),
+    "revenue": (r"^revenue(?! reserves)\b", r"^turnover\b"),
     "operating_profit": (r"^profit from operations\b", r"^operating profit\b"),
     "net_profit": (
         r"^profit for the year\b",
@@ -78,11 +78,7 @@ def extract_metrics(pages: list[str]) -> list[dict]:
                     continue
                 # Audited statements commonly place a small note reference before
                 # the current-period amount. Do not mistake that reference for data.
-                has_note_reference = (
-                    values[0] == values[0].to_integral_value()
-                    and abs(values[0]) <= 200
-                    and abs(values[1]) > 200
-                )
+                has_note_reference = abs(values[0]) <= 200 and abs(values[1]) > 200
                 per_share_note = (
                     metric in {"eps", "bvps", "dps"}
                     and values[0] == values[0].to_integral_value()

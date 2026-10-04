@@ -88,6 +88,13 @@ download URL, publication date, retrieval timestamp, checksum, and local path.
 Educational reference PDFs inform methodology only and cannot supply issuer
 facts.
 
+The financial archive is queried over a rolling three-year window. Discovery
+matches the base issuer symbol (so voting and non-voting securities share issuer
+filings), excludes known non-statement document types, parses the disclosed
+period from the title, and selects the newest annual and interim statement.
+Configured documents are fallbacks. Archive responses have a 15-minute cache;
+PDF bytes and page-preserving extracted text are cached persistently.
+
 ## Manual corrections
 
 `config/corrections.yml` is an append-only YAML overlay keyed by ticker, metric,

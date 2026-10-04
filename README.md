@@ -4,11 +4,11 @@ A reusable, traceable Python pipeline for quarterly screening of Colombo Stock
 Exchange companies in the Capital Goods industry group.
 
 The pipeline resolves any supported CSE GICS industry group at runtime from the
-official classification endpoints. Access Engineering, ACL Cables, and Hayleys
-currently have document extraction configurations; every other constituent is
-included with official market data and explicit missing-document review items.
-Extraction is deliberately conservative: incomplete fields are exported to
-manual review.
+official classification endpoints. It queries the official CSE financial archive
+for the latest annual and interim filing of every selected issuer, downloads and
+caches those reports, and runs the same traceable extraction flow across the full
+universe. Extraction is deliberately conservative: incomplete fields are
+exported to manual review.
 
 ## Design priorities
 
@@ -49,6 +49,9 @@ python main.py --company ACL.N0000 --period 2026Q3 --corrections config/correcti
 
 Downloaded PDFs are cached under `data/raw/<ticker>/`. Rerunning the same URLs
 uses the cached bytes and records a cache hit in `06_Sources`.
+The CSE financial-announcement index is refreshed at most every 15 minutes and
+cached under `data/raw/cse_financial_announcements/`. Extracted page text is
+cached beside each PDF, substantially reducing repeat-run time.
 Official CSE cash-dividend announcements are discovered on every run. Their
 structured details are cached under `data/raw/cse_announcements/`, attachments
 under the issuer cache, and results are written to `05_Dividends`.
@@ -89,9 +92,11 @@ relations documents.
 
 ## Company configuration
 
-The company universe is downloaded from CSE each run. `config/companies.yml` is
-an optional ticker-keyed overlay for official report URLs and publication dates;
-it does not define sector membership. Do not put extracted financial values in
+The company universe is downloaded from CSE each run. Annual and interim reports
+are discovered from `getFinancialAnnouncement` using a rolling three-year archive
+window, exact issuer-symbol matching, conservative title classification, and
+period parsing. `config/companies.yml` remains an optional ticker-keyed fallback;
+the newest document per kind wins. Do not put extracted financial values in
 configuration; facts must originate from source documents.
 
 Supported `--sector` values are Energy, Materials, Capital Goods, Commercial &
@@ -166,6 +171,10 @@ they are never used as company-specific facts.
   wired into the parser.
 - Current/prior Group values are accepted only when column order is reliable.
   Three-year history remains null when scope cannot be proven.
+- Automatic discovery selects one latest annual and one latest interim report
+  per issuer. Errata, prospectuses, trust deeds, articles, and accountants'
+  reports are excluded; unusual CSE titles that contain no recognizable period
+  are left unmatched rather than guessed.
 - Total debt, capex, retained earnings, operating cash flow, free cash flow, ROE,
   and ROA are extracted/calculated for configured reports with page-level input
   lineage. Narrative one-off items still need broader note-level discovery.
@@ -175,8 +184,6 @@ they are never used as company-specific facts.
 - The CSE corporate-disclosure feed supplies its current announcement window,
   not a guaranteed complete historical archive. The pipeline collects all cash
   dividends in that feed matching the selected universe and caches their PDFs.
-- Automatic financial-document discovery remains part of the scale-up milestone.
-  Until then, unconfigured tickers are market-data-only.
 - CSE's public market endpoint is operational but undocumented; failures become
   review items rather than silent gaps.
 
@@ -187,8 +194,9 @@ they are never used as company-specific facts.
    initial Excel/CSV/Markdown output (complete).
 3. Harden extraction strategies and manual corrections from review findings
    (persistent correction overlay complete; broader extraction hardening ongoing).
-4. Add automatic document discovery and extraction coverage across every current
-   constituent returned for the selected industry group.
+4. Automatic document discovery and extraction coverage across every current
+   constituent returned for the selected industry group (complete for the live
+   Capital Goods validation; extractor hardening remains ongoing).
 
 ## Neutrality policy
 

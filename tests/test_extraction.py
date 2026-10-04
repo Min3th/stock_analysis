@@ -57,6 +57,21 @@ def test_inline_unit_overrides_missing_page_header_unit():
     assert facts["revenue"]["original_unit"] == "LKR million"
 
 
+def test_decimal_note_reference_is_not_extracted_as_revenue():
+    pages = ["STATEMENT OF PROFIT OR LOSS\nRevenue 5.1 49,660,591,585 34,510,580,202"]
+    facts = {item["metric"]: item for item in extract_metrics(pages)}
+    assert facts["revenue"]["value"] == D(49660591585)
+
+
+def test_revenue_reserves_is_not_revenue():
+    pages = [
+        "STATEMENT OF FINANCIAL POSITION\nRevenue reserves 24,573,025 24,019,205",
+        "STATEMENT OF PROFIT OR LOSS\nRevenue 10,000 9,000",
+    ]
+    facts = {item["metric"]: item for item in extract_metrics(pages)}
+    assert facts["revenue"]["value"] == D(10000)
+
+
 def test_total_debt_sums_current_and_non_current_without_leases():
     pages = [
         (
