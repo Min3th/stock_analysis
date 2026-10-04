@@ -10,17 +10,12 @@ from zoneinfo import ZoneInfo
 import httpx
 import yaml
 
-from .calculations.ratios import (
-    debt_to_equity,
-    divide,
-    dividend_yield,
-    free_cash_flow,
-    net_debt,
-    payout_ratio,
-    price_earnings,
-    price_to_book,
-    roa,
-    roe,
+from .calculations.screening import (
+    SCREEN_COLUMNS,
+    Snapshot,
+    build_snapshot,
+    previous_value,
+    screening_metrics,
 )
 from .corrections import correction_candidates, load_corrections
 from .downloaders.announcements import CSEDividendClient, dividend_type
@@ -31,56 +26,12 @@ from .downloaders.universe import CSEUniverseClient, apply_universe_config
 from .exporters.workbook import export_all
 from .extractors.statements import (
     METRIC_ALIASES,
-    extract_cash_equivalents,
-    extract_interim_flow_metrics,
-    extract_metrics,
+    extract_document_metrics,
     extract_one_off_indicators,
-    extract_ordinary_shares,
-    extract_retained_earnings_note,
-    extract_total_debt,
 )
 from .parsers.pdf import extract_document
-from .periods import TTM_FLOW_METRICS, ttm_from_annual_and_ytd
 from .validators.extraction import validate_extracted_facts
 from .validators.flags import company_flags, sector_relative_flags
-
-SCREEN_COLUMNS = [
-    "Ticker",
-    "Company",
-    "Current Price",
-    "Market Cap",
-    "Revenue",
-    "Operating Profit",
-    "EBIT",
-    "Revenue Growth YoY",
-    "Net Profit",
-    "EPS",
-    "Ordinary Shares Outstanding",
-    "EPS Growth YoY",
-    "3Y Revenue CAGR",
-    "3Y EPS CAGR",
-    "ROE",
-    "ROA",
-    "Debt-to-Equity",
-    "Net Debt",
-    "Retained Earnings",
-    "Operating Cash Flow",
-    "Free Cash Flow",
-    "OCF / Net Profit",
-    "P/E",
-    "P/B",
-    "DPS",
-    "Dividend Yield",
-    "Payout Ratio",
-    "Earnings Yield",
-    "Average Daily Volume",
-    "Median Daily Volume",
-    "Liquidity Trading Days",
-    "Liquidity Period",
-    "Latest Financial Period",
-    "Data Confidence",
-    "Flags",
-]
 
 
 def run(
@@ -91,9 +42,7 @@ def run(
     correction_path: Path | None = None,
 ) -> dict[str, Path]:
     config = yaml.safe_load((root / "config" / "companies.yml").read_text(encoding="utf-8"))
-    pipeline_config = yaml.safe_load(
-        (root / "config" / "pipeline.example.yml").read_text(encoding="utf-8")
-    )
+    pipeline_config = load_pipeline_config(root / "config")
     configured = {item["ticker"]: item for item in config["companies"]}
     as_of = datetime.now(ZoneInfo("Asia/Colombo")).date()
     group, cse_companies = CSEUniverseClient().companies(industry_group)
@@ -144,9 +93,16 @@ def run(
     liquidity = liquidity_store.summaries(
         [issuer["ticker"] for issuer in companies], liquidity_lookback
     )
+    threshold = Decimal(str(pipeline_config.get("confidence_threshold", "0.8")))
+    share_classes: dict[str, int] = {}
     for issuer in companies:
-        facts: dict[str, dict] = {}
-        annual_facts: dict[str, dict] = {}
+        symbol = issuer["ticker"].split(".", 1)[0]
+        share_classes[symbol] = share_classes.get(symbol, 0) + 1
+
+    def usable(fact: dict) -> bool:
+        return fact["confidence"] >= threshold
+
+    for issuer in companies:
         document_facts: list[tuple[dict, list[dict]]] = []
         one_off_evidence: list[dict] = []
         document_errors: list[str] = []
@@ -154,6 +110,30 @@ def run(
             document_errors.append(financial_discovery_error)
         if dividend_error:
             document_errors.append(dividend_error)
+        market = issuer.get("market_data")
+        try:
+            if market is None:
+                market = get_market_data(issuer["ticker"])
+        except (httpx.HTTPError, KeyError, ValueError) as exc:
+            market = {
+                "price": None,
+                "market_cap": None,
+                "share_volume": None,
+                "quantity_issued": None,
+            }
+            document_errors.append(f"market data: {exc}")
+
+        price = _decimal(market.get("price"))
+        market_cap = _decimal(market.get("market_cap"))
+        implied_shares = (market_cap / price).quantize(Decimal(1)) if market_cap and price else None
+        multi_class = share_classes[issuer["ticker"].split(".", 1)[0]] > 1
+        annual_periods = [
+            str(item["period_end"])
+            for item in issuer.get("documents", [])
+            if item["kind"] == "annual_report"
+        ]
+        latest_annual_period = max(annual_periods, default=None)
+        raw_by_id: dict[str, dict] = {}
         for document in issuer.get("documents", []):
             try:
                 path, checksum, cached = downloader.download(
@@ -186,44 +166,24 @@ def run(
                                 "url": document["url"],
                             }
                         )
-                extracted = extract_metrics(pages)
+                extracted = extract_document_metrics(pages, document["kind"])
                 for candidate in extracted:
                     page_method = parsed.methods[candidate["page"] - 1]
-                    candidate.setdefault("extraction_method", f"statement_label_line+{page_method}")
-                if document["kind"] == "interim_statement":
-                    for candidate in extract_interim_flow_metrics(pages):
-                        page_method = parsed.methods[candidate["page"] - 1]
-                        candidate["extraction_method"] = f"interim_same_scope_columns+{page_method}"
-                        existing = next(
-                            (item for item in extracted if item["metric"] == candidate["metric"]),
-                            None,
-                        )
-                        if existing is not None:
-                            extracted.remove(existing)
-                        extracted.append(candidate)
-                specialized = (
-                    (extract_total_debt(pages), "debt_component_aggregation"),
-                    (extract_cash_equivalents(pages), "cash_component_aggregation"),
-                    (extract_retained_earnings_note(pages), "retained_earnings_note"),
-                    (extract_ordinary_shares(pages), "ordinary_share_count"),
-                )
-                for candidate, method in specialized:
-                    if candidate is None:
-                        continue
-                    page_method = parsed.methods[candidate["page"] - 1]
-                    candidate["extraction_method"] = f"{method}+{page_method}"
-                    existing = next(
-                        (item for item in extracted if item["metric"] == candidate["metric"]), None
-                    )
-                    if existing is None:
-                        extracted.append(candidate)
-                    elif candidate["confidence"] > existing["confidence"]:
-                        extracted.remove(existing)
-                        extracted.append(candidate)
+                    strategy = candidate.get("extraction_method", "statement_label_line")
+                    candidate["extraction_method"] = f"{strategy}+{page_method}"
                 for candidate in correction_candidates(corrections, issuer["ticker"], document):
                     extracted.append(candidate)
                     applied_corrections.add(candidate["correction_id"])
-                validation_issues = validate_extracted_facts(extracted)
+                is_latest_annual = (
+                    document["kind"] == "annual_report"
+                    and str(document["period_end"]) == latest_annual_period
+                )
+                validation_issues = validate_extracted_facts(
+                    extracted,
+                    implied_shares=implied_shares if is_latest_annual else None,
+                    multi_class=multi_class,
+                    check_per_share=is_latest_annual,
+                )
                 for issue in validation_issues:
                     review.append(
                         {
@@ -268,115 +228,48 @@ def run(
                     fact_suffix = (
                         f":correction:{fact['correction_id']}" if fact.get("correction_id") else ""
                     )
-                    record = {
-                        "Fact ID": f"{issuer['ticker']}:{doc_id}:{fact['metric']}:{fact['page']}{fact_suffix}",
-                        "Company": issuer["name"],
-                        "Ticker": issuer["ticker"],
-                        "Financial Period": str(document["period_end"]),
-                        "Metric": fact["metric"],
-                        "Extracted Value": fact["value"],
-                        "Unit": fact["unit"],
-                        "Original Value": fact["original_value"],
-                        "Original Unit": fact["original_unit"],
-                        "Scale Multiplier": fact["multiplier"],
-                        "Source Document": document["title"],
-                        "Source URL": document["url"],
-                        "Source Page": fact["page"],
-                        "Annual/Interim": document["kind"],
-                        "Extraction Confidence": fact["confidence"],
-                        "Extraction Method": fact.get("extraction_method", "unknown"),
-                        "Validation Status": fact.get("validation_status", "not_run"),
-                        "Validation Notes": fact.get("validation_notes", ""),
-                        "Source Text": fact["source_text"],
-                        "Notes": fact.get(
-                            "notes",
-                            "First matching consolidated-statement candidate; review before investment use.",
-                        ),
-                        "Correction ID": fact.get("correction_id"),
-                        "Statement Scope": fact.get("statement_scope"),
-                    }
+                    fact["fact_id"] = (
+                        f"{issuer['ticker']}:{doc_id}:{fact['metric']}:{fact['page']}{fact_suffix}"
+                    )
+                    fact["period"] = str(document["period_end"])
+                    fact["document"] = document["title"]
+                    raw_by_id[fact["fact_id"]] = record = {}
                     raw.append(record)
-                    if (
-                        document["kind"] == "annual_report"
-                        and fact["metric"]
-                        in {
-                            "revenue",
-                            "net_profit",
-                            "eps",
-                            "total_equity",
-                            "dps",
-                            "operating_cash_flow",
+                    record.update(
+                        {
+                            "Fact ID": fact["fact_id"],
+                            "Company": issuer["name"],
+                            "Ticker": issuer["ticker"],
+                            "Financial Period": str(document["period_end"]),
+                            "Period Length": _period_length(fact, document),
+                            "Metric": fact["metric"],
+                            "Extracted Value": fact["value"],
+                            "Unit": fact["unit"],
+                            "Original Value": fact["original_value"],
+                            "Original Unit": fact["original_unit"],
+                            "Scale Multiplier": fact["multiplier"],
+                            "Source Document": document["title"],
+                            "Source URL": document["url"],
+                            "Source Page": fact["page"],
+                            "Annual/Interim": document["kind"],
+                            "Statement Scope": fact.get("statement_scope", "unknown"),
+                            "Extraction Confidence": fact["confidence"],
+                            "Extraction Method": fact.get("extraction_method", "unknown"),
+                            "Validation Status": fact.get("validation_status", "not_run"),
+                            "Validation Notes": fact.get("validation_notes", ""),
+                            "Source Text": fact["source_text"],
+                            "Notes": fact.get(
+                                "notes",
+                                "First matching label in the document; review before use.",
+                            ),
+                            "Correction ID": fact.get("correction_id"),
+                            "Used In Screening": "no",
                         }
-                        and fact["confidence"] >= Decimal("0.8")
-                    ):
-                        period_end = document["period_end"]
-                        if fact.get("correction_id"):
-                            history[:] = [
-                                item
-                                for item in history
-                                if not (
-                                    item["Ticker"] == issuer["ticker"]
-                                    and item["Metric"] == fact["metric"]
-                                    and item["Financial Year End"] == str(period_end)
-                                )
-                            ]
-                        # Later columns may switch from Group to Company scope.
-                        comparable_values = fact["comparatives"][:2]
-                        if len(comparable_values) == 2 and abs(comparable_values[1]) < abs(
-                            comparable_values[0]
-                        ) * Decimal("0.01"):
-                            comparable_values = comparable_values[:1]
-                        for offset, historical_value in enumerate(comparable_values):
-                            historical_period = _prior_year_end(period_end, offset)
-                            history.append(
-                                {
-                                    "Ticker": issuer["ticker"],
-                                    "Company": issuer["name"],
-                                    "Financial Year End": str(historical_period),
-                                    "Metric": fact["metric"],
-                                    "Value": historical_value * fact["multiplier"],
-                                    "Unit": fact["unit"],
-                                    "Source Document": document["title"],
-                                    "Source URL": document["url"],
-                                    "Source Page": fact["page"],
-                                    "Confidence": fact["confidence"],
-                                    "Value Basis": "reported current"
-                                    if offset == 0
-                                    else "reported comparative",
-                                    "Source Period End": str(period_end),
-                                    "Correction ID": fact.get("correction_id"),
-                                }
-                            )
-                    # Latest documents win; low-confidence candidates do not silently replace stronger facts.
-                    prior = facts.get(fact["metric"])
-                    if prior is None or (str(document["period_end"]), fact["confidence"]) > (
-                        prior["period"],
-                        prior["confidence"],
-                    ):
-                        facts[fact["metric"]] = {
-                            **fact,
-                            "period": str(document["period_end"]),
-                            "fact_id": record["Fact ID"],
-                        }
-                    if document["kind"] == "annual_report":
-                        prior_annual = annual_facts.get(fact["metric"])
-                        if prior_annual is None or (
-                            str(document["period_end"]),
-                            fact["confidence"],
-                        ) > (prior_annual["period"], prior_annual["confidence"]):
-                            annual_facts[fact["metric"]] = {
-                                **fact,
-                                "period": str(document["period_end"]),
-                                "fact_id": record["Fact ID"],
-                            }
+                    )
+                    history.extend(_history_rows(issuer, document, fact, threshold))
                 document_facts.append((document, extracted))
             except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
                 document_errors.append(f"{document['title']}: {exc}")
-
-        ttm_facts, ttm_rows = _construct_ttm_facts(issuer, annual_facts, document_facts)
-        for metric, fact in ttm_facts.items():
-            facts[metric] = fact
-        ratios.extend(ttm_rows)
 
         for announcement in dividend_announcements.get(issuer["ticker"], []):
             base = announcement.get("reqBaseAnnouncement", {})
@@ -433,82 +326,31 @@ def run(
                     "Detail Cache Hit": announcement.get("_cache_hit"),
                 }
             )
-        market = issuer.get("market_data")
-        try:
-            if market is None:
-                market = get_market_data(issuer["ticker"])
-        except (httpx.HTTPError, KeyError, ValueError) as exc:
-            market = {
-                "price": None,
-                "market_cap": None,
-                "share_volume": None,
-                "quantity_issued": None,
-            }
-            document_errors.append(f"market data: {exc}")
-
-        def value(key: str, fact_map: dict[str, dict] = facts):
-            return fact_map.get(key, {}).get("value")
-
-        price = _decimal(market.get("price"))
         liquidity_summary = liquidity.get(issuer["ticker"], {})
-        eps, bvps, dps = value("eps"), value("bvps"), value("dps")
-        operating_profit = value("operating_profit")
-        explicit_ebit = value("ebit")
-        ebit = explicit_ebit if explicit_ebit is not None else operating_profit
-
-        def annual_value(key: str, fact_map: dict[str, dict] = annual_facts):
-            return fact_map.get(key, {}).get("value")
-
-        def annual_comparative(key: str, fact_map: dict[str, dict] = annual_facts):
-            fact = fact_map.get(key, {})
-            values = fact.get("comparatives", [])
-            return values[1] * fact.get("multiplier", Decimal(1)) if len(values) >= 2 else None
-
-        equity_metric = (
-            "ordinary_equity" if annual_value("ordinary_equity") is not None else "total_equity"
+        observations = [item for item in history if item["Ticker"] == issuer["ticker"]]
+        market_fact = _market_share_count(
+            issuer, document_facts, latest_annual_period, implied_shares, multi_class, usable
         )
-        profit_metric = (
-            "net_profit_attributable"
-            if annual_value("net_profit_attributable") is not None
-            else "net_profit"
-        )
-        ordinary_equity = annual_value(equity_metric)
-        ordinary_equity_previous = annual_comparative(equity_metric)
-        annual_profit_attributable = annual_value(profit_metric)
-        total_debt = annual_value("total_debt")
-        annual_ocf = annual_value("operating_cash_flow")
-        annual_capex = annual_value("capital_expenditure")
+        if market_fact is not None:
+            raw_by_id[market_fact["fact_id"]] = record = _market_fact_record(issuer, market_fact)
+            raw.append(record)
+        snapshot = build_snapshot(issuer["ticker"], document_facts, usable)
+        metrics, lineage = screening_metrics(snapshot, price, observations)
+        for fact in snapshot.annual.values():
+            raw_by_id[fact["fact_id"]]["Used In Screening"] = "yes"
+        for fact in snapshot.ttm.values():
+            for source in fact["inputs"]:
+                raw_by_id[source["fact_id"]]["Used In Screening"] = "yes (TTM input)"
+        ratios.extend(lineage)
         row = {column: None for column in SCREEN_COLUMNS}
+        row.update(metrics)
         row.update(
             {
                 "Ticker": issuer["ticker"],
                 "Company": issuer["name"],
                 "Current Price": price,
-                "Market Cap": _decimal(market.get("market_cap")),
-                "Revenue": value("revenue"),
-                "Operating Profit": operating_profit,
-                "EBIT": ebit,
-                "Net Profit": value("net_profit"),
-                "EPS": eps,
-                "Ordinary Shares Outstanding": value("ordinary_shares_outstanding"),
-                "ROE": roe(annual_profit_attributable, ordinary_equity, ordinary_equity_previous),
-                "ROA": roa(
-                    annual_value("net_profit"),
-                    annual_value("total_assets"),
-                    annual_comparative("total_assets"),
-                ),
-                "Debt-to-Equity": debt_to_equity(total_debt, ordinary_equity),
-                "Net Debt": net_debt(total_debt, annual_value("cash")),
-                "Retained Earnings": annual_value("retained_earnings"),
-                "Operating Cash Flow": annual_ocf,
-                "Free Cash Flow": free_cash_flow(annual_ocf, annual_capex),
-                "OCF / Net Profit": divide(annual_ocf, annual_value("net_profit")),
-                "P/E": price_earnings(price, eps),
-                "P/B": price_to_book(price, bvps),
-                "DPS": dps,
-                "Dividend Yield": dividend_yield(dps, price),
-                "Payout Ratio": payout_ratio(dps, eps),
-                "Earnings Yield": (eps / price if eps is not None and price else None),
+                "Market Cap": market_cap,
+                "Recent Volume": market.get("share_volume"),
                 "Average Daily Volume": liquidity_summary.get("average_volume"),
                 "Median Daily Volume": liquidity_summary.get("median_volume"),
                 "Liquidity Trading Days": liquidity_summary.get("observations"),
@@ -518,27 +360,49 @@ def run(
                     if liquidity_summary.get("period_start")
                     else None
                 ),
-                "Latest Financial Period": max((v["period"] for v in facts.values()), default=None),
-                "Recent Volume": market.get("share_volume"),
-                "Data Confidence": "high"
-                if len(facts) >= 8
-                and all(v["confidence"] >= Decimal("0.8") for v in facts.values())
-                else "review",
+                "Data Confidence": _data_confidence(snapshot, document_facts, threshold),
             }
         )
-        _add_growth_metrics(row, issuer["ticker"], history)
-        row["Flags"] = "; ".join(
-            company_flags(
-                row,
-                thresholds,
-                history=_deduplicate_history(history),
-                total_equity=annual_value("total_equity"),
-                one_off_evidence=one_off_evidence,
+        if snapshot.annual_end and (as_of - snapshot.annual_end).days > 548:
+            row["Data Confidence"] = "review" if row["Data Confidence"] == "high" else "low"
+            snapshot.notes.append(
+                f"The latest annual report available is for the year to {snapshot.annual_end}; "
+                "no later annual report was found, so annual metrics are out of date."
             )
+        if snapshot.annual_months != 12 and row["Data Confidence"] == "high":
+            row["Data Confidence"] = "review"
+        for note in snapshot.notes:
+            review.append(
+                {
+                    "Company": issuer["name"],
+                    "Ticker": issuer["ticker"],
+                    "Metric": "period_basis",
+                    "Financial Period": row["Latest Financial Period"],
+                    "Candidate Values": "",
+                    "Source Document": "",
+                    "Source Page": "",
+                    "Source Text": "",
+                    "Extraction Strategy": "",
+                    "Validation Rule": "period_basis",
+                    "Reason for Uncertainty": note,
+                }
+            )
+        total_equity = snapshot.annual_value("total_equity")
+        company_flag_list = company_flags(
+            row,
+            thresholds,
+            history=observations,
+            total_equity=total_equity,
+            one_off_evidence=one_off_evidence,
         )
+        if snapshot.annual_months != 12:
+            company_flag_list.append(
+                f"financial period of {snapshot.annual_months} months (year-end changed)"
+            )
+        row["Flags"] = "; ".join(company_flag_list)
         flag_context[issuer["ticker"]] = {
             "one_off_evidence": one_off_evidence,
-            "total_equity": annual_value("total_equity"),
+            "total_equity": total_equity,
         }
         sources.append(
             {
@@ -556,129 +420,8 @@ def run(
             }
         )
         screening.append(row)
-        ebit_input = facts.get("ebit") or facts.get("operating_profit")
-        ratios.append(
-            {
-                "Ticker": issuer["ticker"],
-                "Metric": "EBIT",
-                "Value": ebit,
-                "Formula": "Explicit reported EBIT"
-                if explicit_ebit is not None
-                else "Operating profit used as EBIT proxy",
-                "Numerator": ebit,
-                "Denominator": None,
-                "Input Fact IDs": ebit_input["fact_id"] if ebit_input else "",
-                "Source Pages": str(ebit_input["page"]) if ebit_input else "",
-                "Period Basis": ebit_input["period"] if ebit_input else None,
-                "Notes": None
-                if explicit_ebit is not None
-                else "Proxy is explicitly labelled; no reported EBIT line was accepted.",
-            }
-        )
-        for metric in ("P/E", "P/B", "Dividend Yield", "Payout Ratio", "Earnings Yield"):
-            input_names = {
-                "P/E": ("Current Price", "EPS"),
-                "P/B": ("Current Price", "bvps"),
-                "Dividend Yield": ("DPS", "Current Price"),
-                "Payout Ratio": ("DPS", "EPS"),
-                "Earnings Yield": ("EPS", "Current Price"),
-            }[metric]
-            ratios.append(
-                {
-                    "Ticker": issuer["ticker"],
-                    "Metric": metric,
-                    "Value": row[metric],
-                    "Formula": f"{input_names[0]} / {input_names[1]}",
-                    "Numerator": row.get(input_names[0])
-                    if input_names[0] in row
-                    else value(input_names[0]),
-                    "Denominator": row.get(input_names[1])
-                    if input_names[1] in row
-                    else value(input_names[1]),
-                    "Input Fact IDs": "; ".join(
-                        v["fact_id"]
-                        for k, v in facts.items()
-                        if k in {x.lower() for x in input_names}
-                    ),
-                    "Source Pages": "; ".join(
-                        str(v["page"])
-                        for k, v in facts.items()
-                        if k in {x.lower() for x in input_names}
-                    ),
-                }
-            )
-        calculation_specs = [
-            (
-                "ROE",
-                row["ROE"],
-                "Net profit attributable / average ordinary equity",
-                annual_profit_attributable,
-                (ordinary_equity + ordinary_equity_previous) / Decimal(2)
-                if ordinary_equity is not None and ordinary_equity_previous is not None
-                else None,
-                (profit_metric, equity_metric),
-            ),
-            (
-                "ROA",
-                row["ROA"],
-                "Net profit / average total assets",
-                annual_value("net_profit"),
-                (annual_value("total_assets") + annual_comparative("total_assets")) / Decimal(2)
-                if annual_value("total_assets") is not None
-                and annual_comparative("total_assets") is not None
-                else None,
-                ("net_profit", "total_assets"),
-            ),
-            (
-                "Debt-to-Equity",
-                row["Debt-to-Equity"],
-                "Total debt / ordinary equity",
-                total_debt,
-                ordinary_equity,
-                ("total_debt", equity_metric),
-            ),
-            (
-                "Net Debt",
-                row["Net Debt"],
-                "Total debt - cash and cash equivalents",
-                total_debt,
-                annual_value("cash"),
-                ("total_debt", "cash"),
-            ),
-            (
-                "Free Cash Flow",
-                row["Free Cash Flow"],
-                "Operating cash flow - absolute capex",
-                annual_ocf,
-                annual_capex,
-                ("operating_cash_flow", "capital_expenditure"),
-            ),
-            (
-                "OCF / Net Profit",
-                row["OCF / Net Profit"],
-                "Operating cash flow / net profit",
-                annual_ocf,
-                annual_value("net_profit"),
-                ("operating_cash_flow", "net_profit"),
-            ),
-        ]
-        for metric, result, formula, numerator, denominator, input_metrics in calculation_specs:
-            input_facts = [annual_facts[name] for name in input_metrics if name in annual_facts]
-            ratios.append(
-                {
-                    "Ticker": issuer["ticker"],
-                    "Metric": metric,
-                    "Value": result,
-                    "Formula": formula,
-                    "Numerator": numerator,
-                    "Denominator": denominator,
-                    "Input Fact IDs": "; ".join(item["fact_id"] for item in input_facts),
-                    "Source Pages": "; ".join(str(item["page"]) for item in input_facts),
-                    "Period Basis": max((item["period"] for item in input_facts), default=None),
-                }
-            )
-        required_metrics = [*METRIC_ALIASES, "ordinary_shares_outstanding"]
-        missing = [metric for metric in required_metrics if metric not in facts]
+        required_metrics = [*METRIC_ALIASES, "total_debt", "ordinary_shares_outstanding"]
+        missing = [metric for metric in required_metrics if metric not in snapshot.annual]
         if not issuer.get("documents"):
             document_errors.append(
                 "No official financial document URLs are configured yet; market data only"
@@ -696,7 +439,9 @@ def run(
                     "Source Text": "",
                     "Extraction Strategy": "",
                     "Validation Rule": "missing_metric",
-                    "Reason for Uncertainty": "No reliable label/number candidate found",
+                    "Reason for Uncertainty": (
+                        "No candidate for this metric was found in the latest annual report"
+                    ),
                 }
             )
         for error in document_errors:
@@ -737,7 +482,7 @@ def run(
     return export_all(
         period,
         group["industry_group"],
-        root / "reports",
+        root / str(pipeline_config.get("reports_directory", "reports")),
         screening,
         raw,
         ratios,
@@ -747,7 +492,30 @@ def run(
         _flag_records(screening, flag_context, thresholds),
         review,
         universe_audit,
+        processed=root / str(pipeline_config.get("processed_directory", "data/processed")),
     )
+
+
+def load_pipeline_config(config_directory: Path) -> dict:
+    """Settings from ``pipeline.yml`` laid over the shipped defaults.
+
+    ``pipeline.example.yml`` holds every default. A local ``pipeline.yml`` only
+    needs the keys it changes; nested sections such as ``flags`` are merged.
+    """
+    settings = yaml.safe_load(
+        (config_directory / "pipeline.example.yml").read_text(encoding="utf-8")
+    )
+    local = config_directory / "pipeline.yml"
+    if local.exists():
+        overrides = yaml.safe_load(local.read_text(encoding="utf-8")) or {}
+        if not isinstance(overrides, dict):
+            raise TypeError(f"{local}: expected a mapping of settings")
+        for key, value in overrides.items():
+            if isinstance(value, dict) and isinstance(settings.get(key), dict):
+                settings[key] = {**settings[key], **value}
+            else:
+                settings[key] = value
+    return settings
 
 
 def _decimal(value) -> Decimal | None:
@@ -831,6 +599,177 @@ def _flag_records(rows: list[dict], contexts: dict[str, dict], thresholds: dict)
     return output
 
 
+def _period_length(fact: dict, document: dict) -> str | None:
+    """Human-readable length of the period a flow fact covers."""
+    months = fact.get("period_months")
+    if months == 0:
+        return "year to date"
+    if months:
+        return f"{months} months"
+    return "12 months" if document["kind"] == "annual_report" else None
+
+
+HISTORY_METRICS = {"revenue", "net_profit", "eps", "total_equity", "dps", "operating_cash_flow"}
+
+
+CORE_METRICS = (
+    "revenue",
+    "net_profit",
+    "eps",
+    "total_assets",
+    "total_equity",
+    "operating_cash_flow",
+)
+
+
+def _data_confidence(
+    snapshot: Snapshot, document_facts: list[tuple[dict, list[dict]]], threshold: Decimal
+) -> str:
+    """Summarise how much of the latest annual report passed validation.
+
+    ``high``: every core metric is usable and nothing in the latest annual
+    report is under review. ``review``: some values were withheld or flagged.
+    ``low``: fewer than half of the core metrics are usable.
+    """
+    core = sum(metric in snapshot.annual for metric in CORE_METRICS)
+    if core < len(CORE_METRICS) / 2:
+        return "low"
+    latest = [
+        facts
+        for document, facts in document_facts
+        if document["kind"] == "annual_report"
+        and snapshot.annual_end is not None
+        and str(document["period_end"]) == snapshot.annual_end.isoformat()
+    ]
+    flagged = any(
+        fact["confidence"] < threshold or fact.get("validation_status") == "review"
+        for facts in latest
+        for fact in facts
+        if fact["metric"] in CORE_METRICS
+    )
+    return "high" if core == len(CORE_METRICS) and not flagged else "review"
+
+
+def _market_share_count(
+    issuer: dict,
+    document_facts: list[tuple[dict, list[dict]]],
+    latest_annual_period: str | None,
+    implied_shares: Decimal | None,
+    multi_class: bool,
+    usable,
+) -> dict | None:
+    """Add the CSE-implied share count when the annual report gives no usable one.
+
+    The count is market capitalisation divided by the last traded price for the
+    listed class. It is not used for an issuer with more than one listed class,
+    because one class is not the whole ordinary share base.
+    """
+    if implied_shares is None or multi_class or latest_annual_period is None:
+        return None
+    for document, facts in document_facts:
+        if document["kind"] != "annual_report":
+            continue
+        if str(document["period_end"]) != latest_annual_period:
+            continue
+        reported = [fact for fact in facts if fact["metric"] == "ordinary_shares_outstanding"]
+        if any(usable(fact) for fact in reported):
+            return None
+        market = issuer.get("market_data") or {}
+        fact = {
+            "metric": "ordinary_shares_outstanding",
+            "value": implied_shares,
+            "original_value": implied_shares,
+            "unit": "shares",
+            "original_unit": "shares",
+            "multiplier": Decimal(1),
+            "page": None,
+            "source_text": "CSE market capitalisation / last traded price",
+            "confidence": Decimal("0.85"),
+            "comparatives": [implied_shares],
+            "extraction_method": "cse_market_data_implied_share_count",
+            "statement_scope": "listed class",
+            "fact_id": f"{issuer['ticker']}:market:ordinary_shares_outstanding",
+            "period": latest_annual_period,
+            "source_url": market.get("market_source_url"),
+            "validation_status": "passed",
+            "notes": (
+                "Current shares in issue implied by CSE market data, used because the "
+                "annual report gave no share count that passed reconciliation. It is a "
+                "current count, not the count at the balance-sheet date."
+            ),
+        }
+        facts.append(fact)
+        return fact
+    return None
+
+
+def _market_fact_record(issuer: dict, fact: dict) -> dict:
+    return {
+        "Fact ID": fact["fact_id"],
+        "Company": issuer["name"],
+        "Ticker": issuer["ticker"],
+        "Financial Period": fact["period"],
+        "Period Length": None,
+        "Metric": fact["metric"],
+        "Extracted Value": fact["value"],
+        "Unit": fact["unit"],
+        "Original Value": fact["original_value"],
+        "Original Unit": fact["original_unit"],
+        "Scale Multiplier": fact["multiplier"],
+        "Source Document": "CSE market data",
+        "Source URL": fact.get("source_url"),
+        "Source Page": None,
+        "Annual/Interim": "market_data",
+        "Statement Scope": fact["statement_scope"],
+        "Extraction Confidence": fact["confidence"],
+        "Extraction Method": fact["extraction_method"],
+        "Validation Status": fact["validation_status"],
+        "Validation Notes": "",
+        "Source Text": fact["source_text"],
+        "Notes": fact["notes"],
+        "Correction ID": None,
+        "Used In Screening": "no",
+    }
+
+
+def _history_rows(issuer: dict, document: dict, fact: dict, threshold: Decimal) -> list[dict]:
+    """Annual history observations from a statement's current and comparative columns."""
+    if (
+        document["kind"] != "annual_report"
+        or fact["metric"] not in HISTORY_METRICS
+        or fact["confidence"] < threshold
+        or fact.get("period_months") not in (None, 12)
+    ):
+        return []
+    period_end = document["period_end"]
+    if not isinstance(period_end, date):
+        period_end = date.fromisoformat(str(period_end))
+    observations = [(0, fact["value"], "reported current")]
+    previous = previous_value(fact)
+    # A comparative under 1% of the current value is a different column (for
+    # example a % change), not the prior year.
+    if previous is not None and abs(previous) >= abs(fact["value"]) * Decimal("0.01"):
+        observations.append((1, previous, "reported comparative"))
+    return [
+        {
+            "Ticker": issuer["ticker"],
+            "Company": issuer["name"],
+            "Financial Year End": str(_prior_year_end(period_end, offset)),
+            "Metric": fact["metric"],
+            "Value": value,
+            "Unit": fact["unit"],
+            "Source Document": document["title"],
+            "Source URL": document["url"],
+            "Source Page": fact["page"],
+            "Confidence": fact["confidence"],
+            "Value Basis": basis,
+            "Source Period End": str(period_end),
+            "Correction ID": fact.get("correction_id"),
+        }
+        for offset, value, basis in observations
+    ]
+
+
 def _prior_year_end(period_end: date, offset: int) -> date:
     try:
         return period_end.replace(year=period_end.year - offset)
@@ -892,108 +831,3 @@ def _merge_documents(discovered: list[dict], configured: list[dict]) -> list[dic
                 by_period[key] = item
         selected.extend(by_period[key] for key in sorted(by_period, reverse=True)[:limit])
     return selected
-
-
-def _construct_ttm_facts(
-    issuer: dict, annual_facts: dict[str, dict], document_facts: list[tuple[dict, list[dict]]]
-) -> tuple[dict[str, dict], list[dict]]:
-    """Build traceable TTM flows only from explicitly described compatible YTD data."""
-    output: dict[str, dict] = {}
-    lineage: list[dict] = []
-    annual_documents = [
-        document for document, _ in document_facts if document["kind"] == "annual_report"
-    ]
-    if not annual_documents:
-        return output, lineage
-    annual_document = max(annual_documents, key=lambda item: str(item["period_end"]))
-    annual_end = date.fromisoformat(str(annual_document["period_end"]))
-    for document, extracted in document_facts:
-        if document["kind"] != "interim_statement" or not document.get("period_months"):
-            continue
-        current_end = date.fromisoformat(str(document["period_end"]))
-        prior_end_value = document.get("comparative_period_end")
-        if not prior_end_value:
-            continue
-        prior_end = date.fromisoformat(str(prior_end_value))
-        months = int(document["period_months"])
-        for current in extracted:
-            metric = current["metric"]
-            annual = annual_facts.get(metric)
-            comparatives = current.get("comparatives", [])
-            if metric not in TTM_FLOW_METRICS or annual is None or len(comparatives) < 2:
-                continue
-            prior_ytd = comparatives[1] * current.get("multiplier", Decimal(1))
-            result = ttm_from_annual_and_ytd(
-                annual["value"],
-                current["value"],
-                prior_ytd,
-                annual_end=annual_end,
-                current_end=current_end,
-                prior_end=prior_end,
-                months=months,
-            )
-            if result is None:
-                continue
-            period = f"TTM ended {current_end.isoformat()}"
-            fact_id = f"{issuer['ticker']}:TTM:{metric}:{current_end.isoformat()}"
-            output[metric] = {
-                **current,
-                "value": result,
-                "period": period,
-                "fact_id": fact_id,
-                "confidence": min(annual["confidence"], current["confidence"]),
-                "notes": "Calculated as latest FY + current YTD - prior comparable YTD.",
-            }
-            lineage.append(
-                {
-                    "Ticker": issuer["ticker"],
-                    "Metric": f"{metric} (TTM)",
-                    "Value": result,
-                    "Formula": "Latest FY + current YTD - prior comparable YTD",
-                    "Numerator": annual["value"],
-                    "Denominator": None,
-                    "Current YTD": current["value"],
-                    "Prior YTD": prior_ytd,
-                    "Input Fact IDs": f"{annual['fact_id']}; interim:{metric}:{current_end.isoformat()}",
-                    "Source Pages": f"{annual['page']}; {current['page']}",
-                    "Period Basis": period,
-                }
-            )
-    return output, lineage
-
-
-def _add_growth_metrics(row: dict, ticker: str, history: list[dict]) -> None:
-    from .calculations.ratios import cagr, growth
-
-    def series(metric: str) -> list[dict]:
-        return sorted(
-            (
-                item
-                for item in _deduplicate_history(history)
-                if item["Ticker"] == ticker and item["Metric"] == metric
-            ),
-            key=lambda item: item["Financial Year End"],
-            reverse=True,
-        )
-
-    def valid_cagr(items: list[dict]) -> Decimal | None:
-        if len(items) < 3:
-            return None
-        end = date.fromisoformat(items[0]["Financial Year End"])
-        start = date.fromisoformat(items[2]["Financial Year End"])
-        if (end.month, end.day) != (start.month, start.day) or end.year - start.year != 2:
-            return None
-        return cagr(items[0]["Value"], items[2]["Value"], 2)
-
-    revenues, eps_values, profits = series("revenue"), series("eps"), series("net_profit")
-    row["Revenue Growth YoY"] = (
-        growth(revenues[0]["Value"], revenues[1]["Value"]) if len(revenues) >= 2 else None
-    )
-    row["EPS Growth YoY"] = (
-        growth(eps_values[0]["Value"], eps_values[1]["Value"]) if len(eps_values) >= 2 else None
-    )
-    row["Net Profit Growth YoY"] = (
-        growth(profits[0]["Value"], profits[1]["Value"]) if len(profits) >= 2 else None
-    )
-    row["3Y Revenue CAGR"] = valid_cagr(revenues)
-    row["3Y EPS CAGR"] = valid_cagr(eps_values)

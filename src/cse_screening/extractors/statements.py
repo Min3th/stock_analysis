@@ -6,6 +6,13 @@ import re
 from decimal import Decimal
 
 from ..units import detect_unit, parse_number
+from .layout import (
+    locate_statements,
+    normalize_text,
+    strip_note_reference,
+    trailing_values,
+)
+from .primary import PRIMARY_ROWS, extract_primary_metrics
 
 METRIC_ALIASES = {
     "revenue": (r"^revenue(?! reserves)\b", r"^turnover\b"),
@@ -29,7 +36,7 @@ METRIC_ALIASES = {
     ),
     "total_assets": (r"^total assets\b",),
     "total_liabilities": (r"^total liabilities\b",),
-    "total_equity": (r"^total equity\b",),
+    "total_equity": (r"^total equity\b(?!\s*(?:and|&)\s*liabilities)",),
     "ordinary_equity": (
         r"^equity attributable to (?:owners|equity holders) of the (?:company|parent)\b",
         r"^total equity attributable to equity holders of the company\b",
@@ -90,7 +97,8 @@ def candidate_pages(pages: list[str]) -> list[tuple[int, str]]:
     return selected or list(enumerate(pages, 1))
 
 
-def extract_metrics(pages: list[str]) -> list[dict]:
+def _legacy_scan(pages: list[str]) -> list[dict]:
+    """First label match across candidate pages; used when no statement is located."""
     results: list[dict] = []
     seen: set[str] = set()
     for page_number, text in candidate_pages(pages):
@@ -102,25 +110,13 @@ def extract_metrics(pages: list[str]) -> list[dict]:
                     re.search(alias, cleaned, re.IGNORECASE) for alias in aliases
                 ):
                     continue
-                matches = NUMBER.findall(cleaned)
-                values = [parse_number(match) for match in matches]
-                values = [value for value in values if value is not None]
+                # Read the row's amount cells as tokens so a note reference is
+                # told apart from a per-share amount by how it is written (an
+                # integer such as "11" versus "6.00"), not by its size alone.
+                cells = strip_note_reference(trailing_values(cleaned), None)
+                values = [value for value in cells.values if value is not None]
                 if len(values) < 2:
                     continue
-                # Audited statements commonly place a small note reference before
-                # the current-period amount. Do not mistake that reference for data.
-                has_note_reference = abs(values[0]) <= 200 and abs(values[1]) > 200
-                per_share_note = (
-                    metric in {"eps", "bvps", "dps"}
-                    and values[0] == values[0].to_integral_value()
-                    and abs(values[0]) <= 200
-                    and (
-                        (metric == "eps" and len(values) >= 5)
-                        or abs(values[0]) > abs(values[1]) * 3
-                    )
-                )
-                if has_note_reference or per_share_note:
-                    values = values[1:]
                 value: Decimal = values[0]
                 is_per_share = metric in {"eps", "bvps", "dps"}
                 inline_unit = detect_unit(cleaned)
@@ -214,6 +210,82 @@ def extract_metrics(pages: list[str]) -> list[dict]:
     return results
 
 
+HIGHLIGHT_ONLY_METRICS = {"bvps", "dps", "ebit"}
+
+
+def extract_metrics(
+    pages: list[str], located: dict[str, list[int]] | None = None, interim: bool = False
+) -> list[dict]:
+    """Extract statement metrics, preferring the located primary statements.
+
+    Rows are read from the primary income statement, statement of financial
+    position and cash-flow statement when they can be located. A label match
+    elsewhere in the document is kept only as a low-confidence candidate for a
+    metric whose primary statement was found but has no such row, so highlights,
+    segment tables and multi-year summaries cannot silently stand in for it.
+    """
+    pages = [normalize_text(page) for page in pages]
+    if located is None:
+        located = locate_statements(pages)
+    primary = extract_primary_metrics(pages, located, interim) if located else []
+    found = {item["metric"] for item in primary}
+    results = list(primary)
+    for candidate in _legacy_scan(pages):
+        metric = candidate["metric"]
+        if metric in found:
+            continue
+        statement = PRIMARY_ROWS.get(metric, (None,))[0]
+        if metric == "net_profit_attributable":
+            statement = "income"
+        if statement in located and metric not in HIGHLIGHT_ONLY_METRICS:
+            candidate["confidence"] = min(candidate["confidence"], Decimal("0.70"))
+            candidate["notes"] = (
+                "No matching row on the located primary statement; this is the first label "
+                "match elsewhere in the document and needs review."
+            )
+            candidate["extraction_method"] = "label_match_outside_primary_statement"
+        results.append(candidate)
+        found.add(metric)
+    return results
+
+
+def extract_document_metrics(pages: list[str], kind: str = "annual_report") -> list[dict]:
+    """All metric candidates for one document, one candidate per metric."""
+    pages = [normalize_text(page) for page in pages]
+    located = locate_statements(pages)
+    interim = kind == "interim_statement"
+    by_metric = {item["metric"]: item for item in extract_metrics(pages, located, interim)}
+    threshold = Decimal("0.8")
+    if interim:
+        # Layouts that print audited annual columns to the left of the row label.
+        for candidate in extract_interim_flow_metrics(pages):
+            existing = by_metric.get(candidate["metric"])
+            if existing is None or existing["confidence"] < threshold:
+                candidate.setdefault("extraction_method", "interim_same_scope_columns")
+                by_metric[candidate["metric"]] = candidate
+    if "position" not in located:
+        # Note-level fallbacks are only needed when no statement of financial
+        # position was located; otherwise an absent row means it is not reported.
+        fallbacks = (
+            (extract_total_debt, "debt_component_aggregation"),
+            (extract_cash_equivalents, "cash_component_aggregation"),
+            (extract_retained_earnings_note, "retained_earnings_note"),
+        )
+        for extractor, method in fallbacks:
+            candidate = extractor(pages)
+            if candidate is None:
+                continue
+            existing = by_metric.get(candidate["metric"])
+            if existing is None or existing["confidence"] < candidate["confidence"]:
+                candidate.setdefault("extraction_method", method)
+                by_metric[candidate["metric"]] = candidate
+    shares = extract_ordinary_shares(pages)
+    if shares is not None:
+        shares.setdefault("extraction_method", "ordinary_share_count")
+        by_metric[shares["metric"]] = shares
+    return list(by_metric.values())
+
+
 def extract_interim_flow_metrics(pages: list[str]) -> list[dict]:
     """Read same-scope current/prior YTD columns from interim primary statements."""
     aliases = {
@@ -228,7 +300,8 @@ def extract_interim_flow_metrics(pages: list[str]) -> list[dict]:
     seen = set()
     for page_number, text in enumerate(pages, 1):
         header = text[:1800].lower()
-        if "unaudited" not in header or not re.search(r"(?:3|03|6|06|9|09) months? to", header):
+        period = re.search(r"\b0?([369]) months? to", header)
+        if "unaudited" not in header or not period:
             continue
         unit = detect_unit(text[:2000])
         for line in text.splitlines():
@@ -262,6 +335,7 @@ def extract_interim_flow_metrics(pages: list[str]) -> list[dict]:
                         "source_text": cleaned,
                         "confidence": Decimal("0.9") if unit else Decimal("0.72"),
                         "comparatives": values[:2],
+                        "period_months": int(period.group(1)),
                         "notes": "Interim primary statement; current/prior same-scope columns after row label.",
                     }
                 )
@@ -389,7 +463,7 @@ def extract_retained_earnings_note(pages: list[str]) -> dict | None:
 def extract_ordinary_shares(pages: list[str]) -> dict | None:
     """Extract period-end ordinary shares, with weighted average as a labelled fallback."""
     primary = (
-        r"^number of ordinary shares\b",
+        r"^number of ordinary shares\b(?!.*\b(?:denominator|weighted|basic|diluted)\b)",
         r"^number of shares in issue",
         r"^issued ordinary shares as at",
         r"^number of ordinary shares \(voting\) issued",
@@ -454,10 +528,16 @@ def extract_ordinary_shares(pages: list[str]) -> dict | None:
                 tail = cleaned[match.end() :]
                 values = [parse_number(item) for item in NUMBER.findall(tail)]
                 values = [item for item in values if item is not None]
-                lowered = cleaned.casefold()
-                if "million" in lowered:
+                # Only a scale stated on the share row itself applies to it; a
+                # currency scale on a neighbouring profit row does not.
+                scoped = cleaned[match.start() :]
+                scale_text = re.sub(
+                    r"(?:rs\.?|lkr)\s*['‘’]?\s*000", "", scoped, flags=re.IGNORECASE
+                )
+                lowered = scale_text.casefold()
+                if "million" in lowered or re.search(r"\bmn\b", lowered):
                     multiplier = Decimal(1000000)
-                elif re.search(r"(?:['‘’]\s*000|no\.\s*['‘’]?000)", cleaned, re.IGNORECASE):
+                elif re.search(r"(?:['‘’]\s*000|no\.\s*['‘’]?000)", scale_text, re.IGNORECASE):
                     multiplier = Decimal(1000)
                 else:
                     multiplier = Decimal(1)

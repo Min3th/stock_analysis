@@ -16,9 +16,11 @@ exported to manual review.
 2. Every raw value retains its document, URL, page, period, unit, confidence,
    extraction method, source text, and notes.
 3. Annual, interim, year-to-date, and trailing-twelve-month periods remain
-   explicit. TTM is calculated only from four discrete quarters or as latest FY
-   plus current YTD less the matching prior YTD; partial periods are never
-   silently annualized.
+   explicit. TTM is calculated only as latest FY plus current YTD less the
+   matching prior YTD, and only when the interim statement header proves the
+   year-to-date length. A bare interim figure never appears in the screening
+   table, partial periods are never annualized, and every calculated value
+   states the period it is based on.
 4. Missing or unreliable values remain null and flow into manual review.
 5. Calculated metrics retain their formula and the exact input records used.
 
@@ -42,17 +44,49 @@ The OCR extra supplies the Python integration; the Tesseract executable must als
 be installed and available on `PATH`. If OCR is required but unavailable, the
 page is retained, the value stays missing, and a `parser_fallback` item is written
 to manual review. PyMuPDF table recognition is enabled by default and requires no
-external executable. Parser settings are under `ocr` and `tables` in
-`config/pipeline.example.yml`.
+external executable. Parser settings are under `ocr` and `tables` in the
+pipeline settings.
+
+### Settings
+
+`config/pipeline.example.yml` holds every default: the confidence threshold,
+output directories, parser options and anomaly thresholds. To change one,
+create `config/pipeline.yml` containing only the keys you want to override;
+nested sections such as `flags` are merged with the defaults.
+
+```yaml
+# config/pipeline.yml
+confidence_threshold: 0.85
+flags:
+  high_debt_to_equity: 1.5
+```
 
 ## Command line
 
 ```powershell
 python main.py --sector "Capital Goods" --period 2026Q3
 python main.py --sector "Banks" --period 2026Q3
-python main.py --company ACL.N0000 --period 2026Q3
+python main.py --company HHL.N0000
 python main.py --company ACL.N0000 --period 2026Q3 --corrections config/corrections.yml
 ```
+
+`--period` is the label written into the output filenames. It defaults to the
+current calendar quarter, so the quarterly rerun is just
+`python main.py --sector "Capital Goods"`. `--company` runs one ticker from the
+selected industry group for debugging.
+
+Each run writes, under `reports/`:
+
+| File | Contents |
+| --- | --- |
+| `Capital_Goods_Screening_2026_Q3.xlsx` | Workbook with `00_Universe` and `01_Screening` to `08_Summary` |
+| `Capital_Goods_Screening_2026_Q3.csv` | The `01_Screening` table |
+| `Capital_Goods_Summary_2026_Q3.md` | Counts, sector medians, highest/lowest raw values, warnings |
+| `Capital_Goods_Universe_2026_Q3.csv` | Membership decisions |
+| `manual_review.csv`, `extraction_warnings.jsonl` | Every value that was withheld or flagged |
+
+The raw-fact, ratio and history tables are also written as CSV under
+`data/processed/`.
 
 Downloaded PDFs are cached under `data/raw/<ticker>/`. Rerunning the same URLs
 uses the cached bytes and records a cache hit in `06_Sources`.
@@ -80,14 +114,14 @@ cells.
 ```text
 config/                 configurable universe and pipeline settings
 data/raw/               cached source documents (ignored by Git)
-data/processed/         normalized intermediate datasets (ignored by Git)
+data/processed/         raw-fact, ratio and history tables as CSV (ignored by Git)
 docs/                   architecture, methodology, and risk decisions
 reports/                generated XLSX, CSV, Markdown, and review files
 src/cse_screening/
-  calculations/         ratios, growth, and calculation lineage
+  calculations/         ratios, period-safe fact selection, and calculation lineage
   downloaders/          CSE/company discovery, download, and cache handling
   exporters/            Excel, CSV, Markdown, and review outputs
-  extractors/           statement metric recognition and candidates
+  extractors/           statement location, column layout, and metric candidates
   parsers/              PDF text/table/OCR strategies
   validators/           accounting, period, range, and anomaly checks
 tests/                   unit and end-to-end fixture tests
@@ -168,35 +202,113 @@ configuration decisions rather than silently changing the official response.
 
 ## Extraction and review
 
-PDF pages are retained as page-numbered text. Statement headings narrow the
-search area, metric aliases produce candidates, reported units are normalized to
-base LKR, and note references are separated from values. The workbook preserves
-original value/unit/text and the normalized result. Low-confidence or absent
-facts appear in `reports/manual_review.csv` rather than being guessed.
+PDF pages are retained as page-numbered text. Extraction then works in four
+steps.
 
-`01_Screening` includes reported operating profit, EBIT, and ordinary shares
-outstanding. EBIT uses an explicitly reported EBIT/profit-before-interest-and-tax
-line when one is accepted; otherwise the displayed EBIT is an operating-profit
-proxy and `03_Ratios` labels that formula and its source fact. Share extraction
-prefers a period-end issued ordinary-share count. A weighted-average share count
-is used only as a lower-confidence, explicitly noted fallback so it is routed to
-manual review rather than silently treated as the period-end balance.
+1. **Locate the primary statements.** Every page is scored for how strongly it
+   resembles an income statement, a statement of financial position or a
+   cash-flow statement (title plus characteristic rows). The best adjacent set
+   is chosen, with continuation pages. Multi-year summaries, segment tables and
+   US-dollar translations are scored down, so they cannot supply a metric.
+2. **Read the column layout.** The page header gives the order of the Group and
+   Company blocks, the order of the years, any restated third column and any
+   % change column. The consolidated current-year cell is selected from that
+   layout; a nil dash keeps its column. `Statement Scope` in `02_Raw_Data`
+   records which block was read and whether the row's cell count agreed with
+   the header (`confirmed`) or the leading pair was taken (`assumed`).
+3. **Read the row.** Labels wrapped over two lines are rejoined. A note
+   reference is told apart from an amount by how it is written (`11` or `10.1`
+   in front of `2.98 2.70`), not by its size. The unit comes from the statement
+   header or an explicit sentence such as "All values are in Rupees '000s"; a
+   page with no unit takes the unit of the other primary statements.
+4. **Fill gaps only by identity.** Total liabilities (total assets less total
+   equity) and parent equity (total equity less non-controlling interests) are
+   derived when the statement prints no such row, and the derivation is named
+   in `Extraction Method`. A label match elsewhere in the document is kept only
+   as a low-confidence review candidate. Net assets per share and dividend per
+   share are also read from highlights when the statements do not print them.
 
-`02_Raw_Data` records the extraction method, validation status, and validation
-notes for every fact. Current validation checks unknown unit/column context,
-the accounting equation (`assets = liabilities + equity`) with a 5% tolerance,
-and extreme profit-to-revenue scale conflicts. A failed check preserves the
-reported value, lowers its confidence, changes its validation status to
-`review`, and writes the candidate values, page, source text, strategy, rule,
-and reason to both review outputs.
+### Validation and the reliability gate
+
+`02_Raw_Data` records the extraction method, validation status and validation
+notes for every fact. A fact whose confidence is below `confidence_threshold`
+(0.80) is **not used**: its screening cell is left empty, and its candidate
+values, page, source text, strategy and reason go to `manual_review.csv`. The
+`Used In Screening` column shows which facts fed the table.
+
+Checks applied to each document:
+
+- unit or column context not established;
+- the accounting equation (`assets = liabilities + equity`) within 5%;
+- net profit more than twice revenue;
+- EPS and profit with opposite signs.
+
+Checks applied to the latest annual report, whose values feed the table:
+
+- EPS against attributable profit / CSE share count;
+- share count against attributable profit / EPS and the CSE-implied count. A
+  count stated in thousands or millions is rescaled only when the scaled count
+  matches a reference within 5%, and the note says so. A count that matches
+  nothing (a weighted average, one class of a dual-class issuer, a pre-split
+  count) is withheld;
+- reported book value per share against parent equity / shares. A figure
+  printed on the statement itself stands and the difference is noted; a
+  highlight figure that does not reconcile is replaced by the calculated one;
+- DPS negative or more than five times EPS.
+
+When no reported share count passes, the current count implied by CSE market
+data (market capitalisation / last price) is used and labelled. It is a current
+count, not the balance-sheet-date count, and it is not used for issuers with
+more than one listed class.
+
+`Data Confidence` is `high` when all six core metrics of the latest annual
+report (revenue, net profit, EPS, total assets, total equity, operating cash
+flow) are usable and none is under review, `low` when fewer than three are, and
+`review` otherwise or when the latest annual report is out of date or does not
+cover twelve months. It reports what the automated checks found. It is not a
+manual verification.
+
+### Periods and calculations
+
+- Balance-sheet figures, ROE, ROA, debt-to-equity, net debt and book value per
+  share come from the latest annual report only (`Balance Sheet Date`). An
+  older report never fills a gap in the latest one.
+- Revenue, profit and EPS are TTM when the latest interim statement gives a
+  proven year-to-date pair, otherwise the latest financial year
+  (`Income Period Basis`). Operating cash flow and capital expenditure follow
+  the same rule separately (`Cash Flow Period Basis`). Every `03_Ratios` row
+  carries its `Period Basis`.
+- TTM needs the interim header to name the period ("three months ended",
+  "quarter", "period ended"). Where a page shows a quarter block and a
+  cumulative block, the cumulative block is read. Year-to-date revenue far out
+  of proportion to the year rejects the income TTM.
+- P/E and earnings yield use EPS on the income basis. Payout ratio uses DPS and
+  EPS for the same financial year. OCF / net profit uses profit for the same
+  period as the cash flow.
+- Growth compares the current and comparative columns of the latest annual
+  statement. Three-year CAGR uses the comparative from the prior year's report
+  and is withheld, with the reason in `03_Ratios`, when the latest report
+  restated the prior year (for example after a share split).
+- P/E, P/B, ROE, debt-to-equity and payout are left empty on a zero or negative
+  base; the negative EPS or equity itself, and earnings yield, are kept.
+- A financial year that is not twelve months is labelled (for example
+  `15 months to 2026-03-31`), flagged, and not compared with a twelve-month
+  year.
+
+`01_Screening` starts with the 27 specified columns in the specified order,
+followed by supporting columns: net profit growth, operating profit, EBIT, book
+value per share, shares, retained earnings, the period-basis columns and the
+liquidity columns. EBIT uses a reported EBIT line when one is accepted;
+otherwise it is an operating-profit proxy and `03_Ratios` says so.
 
 `07_Flags` contains one evidence row per descriptive anomaly. Rules cover
 negative EPS/equity/operating cash flow, two consecutive annual declines in EPS
 or revenue, weak cash conversion, high debt-to-equity, payout above 100%,
 positive P/E and P/B outliers relative to their sector medians, multi-day low
 or insufficient trading-volume history, and explicit one-off/non-recurring
-profit or loss wording. Thresholds are configured under `flags` in
-`config/pipeline.example.yml`. Liquidity uses average and median volume from the
+profit or loss wording. The decline flags compare each year with the
+comparative in the same report, so a share split is not read as a decline.
+Thresholds are configured under `flags` in the pipeline settings. Liquidity uses average and median volume from the
 latest 20 locally captured CSE trading-day observations. A run upserts the
 official volume for the CSE trading date under `data/raw/market_liquidity/`;
 same-day reruns do not create duplicates. Until the configured minimum sample is
@@ -245,49 +357,65 @@ they are never used as company-specific facts.
 
 ## Known limitations
 
+- **The figures have not been checked by hand against the PDFs.** The
+  statement extraction was developed and checked against the cached text of
+  103 filings from 27 Capital Goods issuers using accounting identities (assets
+  = liabilities + equity; EPS x shares against attributable profit). Those
+  checks catch wrong columns, units and rows; they do not prove a value is
+  right. Treat `high` confidence as "passed the automated checks" and verify a
+  company's page citations before relying on its numbers.
+- Statement layouts outside that sample can defeat the locator or the layout
+  reader. The value is then withheld or marked `assumed`, not guessed, and
+  appears in `manual_review.csv`. Other industry groups, banks and insurers in
+  particular, use different statement rows and have not been tested.
+- TTM has only been exercised on first-quarter interim statements. Half-year
+  and nine-month layouts (quarter and cumulative blocks) are handled by rule
+  and unit tests, not yet by real filings; where the year-to-date block cannot
+  be proven the latest financial year is used and labelled.
+- Per-share TTM adds and subtracts reported EPS, which assumes an unchanged
+  share count over the period.
+- DPS comes from the annual report (income statement or highlights). Many
+  issuers print it only in notes, so it is often missing. `05_Dividends` lists
+  the CSE cash-dividend announcements in the current disclosure window; they
+  are not yet combined into a financial-year DPS.
+- Operating profit is taken only from the income statement. Issuers that do not
+  print such a row have no operating profit or EBIT proxy.
+- Total debt sums borrowings, term and import loans, debentures and bank
+  overdrafts on the statement of financial position. Lease liabilities and
+  related-party balances are excluded. A statement with no such rows gives no
+  debt figure, which is not the same as zero debt.
+- The CSE-implied share count is a current figure for one listed class.
+  Dual-class issuers (for example RHL.N0000 and RHL.X0000) therefore get book
+  value per share only from a reported share count.
 - Native text, PyMuPDF table recognition, and page-level Tesseract OCR are wired
-  into a layered parser. OCR still depends on the optional Python packages and a
+  into a layered parser. OCR depends on the optional Python packages and a
   system Tesseract installation; unavailable engines produce review warnings.
-- Current/prior Group values are accepted only when column order is reliable.
-  History and CAGR remain null when three consecutive, matching fiscal year-ends
-  cannot be proven or when CAGR is mathematically undefined for negative values.
-- Validation is intentionally conservative and does not prove that a value is
-  correct. Holding-company presentations and unusual classifications can trigger
-  review even when reported correctly; use the cited page and correction overlay
-  to resolve those cases.
 - Automatic discovery selects the latest three distinct annual periods and the
-  latest interim report per issuer. Overlapping annual comparatives are
-  deduplicated in favor of the directly reported current-year observation, while
-  preserving source period, value basis, page, and confidence in `04_History`.
-  Errata, prospectuses, trust deeds, articles, and accountants'
-  reports are excluded; unusual CSE titles that contain no recognizable period
+  latest interim report per issuer. Errata, prospectuses, trust deeds, articles
+  and accountants' reports are excluded; CSE titles with no recognizable period
   are left unmatched rather than guessed.
-- Total debt, capex, retained earnings, operating cash flow, free cash flow, ROE,
-  and ROA are extracted/calculated for configured reports with page-level input
-  lineage. Narrative one-off items still need broader note-level discovery.
-- TTM construction requires explicit `period_months` and
-  `comparative_period_end` metadata and compatible current/prior YTD columns.
-  It returns null rather than estimating when that evidence is absent.
 - The CSE corporate-disclosure feed supplies its current announcement window,
-  not a guaranteed complete historical archive. The pipeline collects all cash
-  dividends in that feed matching the selected universe and caches their PDFs.
+  not a complete historical archive.
 - CSE's public market endpoint is operational but undocumented; failures become
   review items rather than silent gaps.
 - CSE does not expose a stable public per-security historical-volume endpoint.
-  Multi-day liquidity therefore accumulates from official daily snapshots across
-  runs. Run the pipeline after each trading day (or on a daily schedule) to build
-  the configured 20-day window; the default minimum is five observations.
+  Multi-day liquidity accumulates from official daily snapshots across runs.
+  Run the pipeline after each trading day (or on a daily schedule) to build the
+  configured 20-day window; the default minimum is five observations.
 
 ## Milestone plan
 
 1. Architecture and data contracts (complete).
-2. End-to-end pilot for three representative companies, including tests and
-   initial Excel/CSV/Markdown output (complete).
-3. Harden extraction strategies and manual corrections from review findings
-   (persistent correction overlay complete; broader extraction hardening ongoing).
-4. Automatic document discovery and extraction coverage across every current
-   constituent returned for the selected industry group (complete for the live
-   Capital Goods validation; extractor hardening remains ongoing).
+2. End-to-end pilot for three representative companies (complete).
+3. Persistent correction overlay (complete).
+4. Automatic document discovery across every constituent of the selected
+   industry group (complete).
+5. Primary-statement extraction, period-safe metrics with lineage, and the
+   reliability gate (complete for the Capital Goods sample; see the first
+   limitation above).
+6. Next: manual spot-checks recorded as fixtures, half-year and nine-month
+   interim filings, financial-year DPS from dividend announcements, and
+   statement rows for financial-sector industry groups.
 
 ## Neutrality policy
 

@@ -29,7 +29,7 @@ UNIT_PATTERNS = (
         Decimal(1000000000),
     ),
     (
-        re.compile(r"\b(?:rs(?:\.)?|lkr)(?=\s|$|['0-9])", re.IGNORECASE),
+        re.compile(r"\b(?:rs(?:\.)?|lkr)(?=\s|$|['0-9)])", re.IGNORECASE),
         "LKR",
         Decimal(1),
     ),

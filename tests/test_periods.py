@@ -3,6 +3,8 @@ from decimal import Decimal
 
 from cse_screening.models import FinancialPeriod, PeriodKind
 from cse_screening.periods import (
+    current_period,
+    file_period_label,
     period_label,
     periods_comparable,
     ttm_from_annual_and_ytd,
@@ -59,3 +61,13 @@ def test_ttm_from_four_consecutive_quarters():
         (date(2026, 6, 30), Decimal(35), 3),
     ]
     assert ttm_from_quarters(quarters) == Decimal(110)
+
+
+def test_output_filename_period_label():
+    assert file_period_label("2026Q3") == "2026_Q3"
+    assert file_period_label("2026") == "2026"
+
+
+def test_default_period_is_the_current_calendar_quarter():
+    assert current_period(date(2026, 10, 4)) == "2026Q4"
+    assert current_period(date(2026, 3, 31)) == "2026Q1"
