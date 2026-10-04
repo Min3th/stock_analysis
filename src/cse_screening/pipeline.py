@@ -39,7 +39,7 @@ from .extractors.statements import (
     extract_retained_earnings_note,
     extract_total_debt,
 )
-from .parsers.pdf import extract_pages
+from .parsers.pdf import extract_document
 from .periods import TTM_FLOW_METRICS, ttm_from_annual_and_ytd
 from .validators.extraction import validate_extracted_facts
 from .validators.flags import company_flags, sector_relative_flags
@@ -91,6 +91,9 @@ def run(
     correction_path: Path | None = None,
 ) -> dict[str, Path]:
     config = yaml.safe_load((root / "config" / "companies.yml").read_text(encoding="utf-8"))
+    pipeline_config = yaml.safe_load(
+        (root / "config" / "pipeline.example.yml").read_text(encoding="utf-8")
+    )
     configured = {item["ticker"]: item for item in config["companies"]}
     group, companies = CSEUniverseClient().companies(industry_group)
     for issuer in companies:
@@ -131,7 +134,7 @@ def run(
     except (httpx.HTTPError, OSError, ValueError) as exc:
         dividend_announcements = {}
         dividend_error = f"CSE dividend announcement feed: {exc}"
-    thresholds = yaml.safe_load((root / "config" / "pipeline.example.yml").read_text())["flags"]
+    thresholds = pipeline_config["flags"]
     liquidity_lookback = int(thresholds.get("liquidity_lookback_trading_days", 20))
     liquidity_store = LiquidityStore(root / "data" / "raw")
     liquidity_store.capture(companies)
@@ -153,7 +156,24 @@ def run(
                 path, checksum, cached = downloader.download(
                     issuer["ticker"], document["url"], document["title"]
                 )
-                pages = extract_pages(path)
+                parsed = extract_document(path, pipeline_config)
+                pages = parsed.pages
+                for warning in parsed.warnings:
+                    review.append(
+                        {
+                            "Company": issuer["name"],
+                            "Ticker": issuer["ticker"],
+                            "Metric": "document_page",
+                            "Financial Period": str(document["period_end"]),
+                            "Candidate Values": "",
+                            "Source Document": document["title"],
+                            "Source Page": warning["page"],
+                            "Source Text": "",
+                            "Extraction Strategy": warning["strategy"],
+                            "Validation Rule": "parser_fallback",
+                            "Reason for Uncertainty": warning["reason"],
+                        }
+                    )
                 if document["kind"] == "annual_report":
                     for evidence in extract_one_off_indicators(pages):
                         one_off_evidence.append(
@@ -165,10 +185,12 @@ def run(
                         )
                 extracted = extract_metrics(pages)
                 for candidate in extracted:
-                    candidate.setdefault("extraction_method", "statement_label_line")
+                    page_method = parsed.methods[candidate["page"] - 1]
+                    candidate.setdefault("extraction_method", f"statement_label_line+{page_method}")
                 if document["kind"] == "interim_statement":
                     for candidate in extract_interim_flow_metrics(pages):
-                        candidate["extraction_method"] = "interim_same_scope_columns"
+                        page_method = parsed.methods[candidate["page"] - 1]
+                        candidate["extraction_method"] = f"interim_same_scope_columns+{page_method}"
                         existing = next(
                             (item for item in extracted if item["metric"] == candidate["metric"]),
                             None,
@@ -185,7 +207,8 @@ def run(
                 for candidate, method in specialized:
                     if candidate is None:
                         continue
-                    candidate["extraction_method"] = method
+                    page_method = parsed.methods[candidate["page"] - 1]
+                    candidate["extraction_method"] = f"{method}+{page_method}"
                     existing = next(
                         (item for item in extracted if item["metric"] == candidate["metric"]), None
                     )
@@ -234,6 +257,8 @@ def run(
                         "Discovery Cache Hit": financial_feed_cached
                         if document.get("discovery_url")
                         else None,
+                        "Parsing Methods": "; ".join(sorted(set(parsed.methods))),
+                        "Parser Warnings": len(parsed.warnings),
                     }
                 )
                 for fact in extracted:

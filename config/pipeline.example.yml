@@ -11,6 +11,9 @@ user_agent: cse-capital-goods-screening/0.1
 ocr:
   enabled: true
   minimum_text_characters_per_page: 80
+  dpi: 300
+tables:
+  enabled: true
 flags:
   high_debt_to_equity: 2.0
   ocf_to_net_profit_low: 0.70

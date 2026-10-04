@@ -5,7 +5,7 @@ Exchange companies in the Capital Goods industry group.
 
 The pipeline resolves any supported CSE GICS industry group at runtime from the
 official classification endpoints. It queries the official CSE financial archive
-for the latest annual and interim filing of every selected issuer, downloads and
+for the latest three annual periods and latest interim filing of every selected issuer, downloads and
 caches those reports, and runs the same traceable extraction flow across the full
 universe. Extraction is deliberately conservative: incomplete fields are
 exported to manual review.
@@ -37,6 +37,13 @@ OCR is optional and is not invoked unless a page fails the text-density test:
 ```powershell
 python -m pip install -e ".[ocr]"
 ```
+
+The OCR extra supplies the Python integration; the Tesseract executable must also
+be installed and available on `PATH`. If OCR is required but unavailable, the
+page is retained, the value stays missing, and a `parser_fallback` item is written
+to manual review. PyMuPDF table recognition is enabled by default and requires no
+external executable. Parser settings are under `ocr` and `tables` in
+`config/pipeline.example.yml`.
 
 ## Command line
 
@@ -209,8 +216,9 @@ they are never used as company-specific facts.
 
 ## Known limitations
 
-- The pilot extractor handles text PDFs; OCR fallback is configured but not yet
-  wired into the parser.
+- Native text, PyMuPDF table recognition, and page-level Tesseract OCR are wired
+  into a layered parser. OCR still depends on the optional Python packages and a
+  system Tesseract installation; unavailable engines produce review warnings.
 - Current/prior Group values are accepted only when column order is reliable.
   History and CAGR remain null when three consecutive, matching fiscal year-ends
   cannot be proven or when CAGR is mathematically undefined for negative values.
