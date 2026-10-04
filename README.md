@@ -118,6 +118,32 @@ period parsing. `config/companies.yml` remains an optional ticker-keyed fallback
 the newest document per kind wins. Do not put extracted financial values in
 configuration; facts must originate from source documents.
 
+The `universe` section applies membership independently of document fallbacks:
+
+```yaml
+universe:
+  exclude:
+    - EXAMPLE.N0000
+  include:
+    - ticker: MANUAL.N0000
+      name: MANUALLY INCLUDED PLC
+      industry_group: Capital Goods
+      profile_url: https://www.cse.lk/pages/company-profile/company-profile.component.html?symbol=MANUAL.N0000
+      classification_source_url: https://example.com/classification-evidence
+  overrides:
+    KEEP.N0000:
+      name: CORRECTED DISPLAY NAME PLC
+```
+
+Exclusions take precedence. Includes may add a ticker even when it is absent
+from the current CSE response. Overrides only modify current official members;
+an unknown override stops the run so configuration mistakes are not ignored.
+`companies` continues to hold document URL fallbacks and does not change
+membership. Every decision, including excluded and no-longer-present tickers, is
+written to `00_Universe` and `reports/<Sector>_Universe_<Period>.csv` with company
+name, ticker, GICS sector and industry group, profile URL, classification date,
+classification source, membership source, and inclusion decision.
+
 Supported `--sector` values are Energy, Materials, Capital Goods, Commercial &
 Professional Services, Transportation, Automobiles & Components, Consumer
 Durables & Apparel, Consumer Services, Retailing, Food & Staples Retailing,
@@ -132,10 +158,10 @@ At the time of validation, the CSE endpoint returned no listed constituents for
 that technology group; the pipeline therefore creates a valid empty report rather
 than substituting companies from another category.
 
-The CSE universe response is authoritative for a run and may differ from a daily
-sector-statistics security count because of inactive or separately listed share
-classes. The source URL and runtime result are retained rather than forcing a
-hard-coded expected count.
+The CSE universe response is the default authority for a run and may differ from
+a daily sector-statistics security count because of inactive or separately
+listed share classes. Explicit includes/excludes are retained as auditable
+configuration decisions rather than silently changing the official response.
 
 ## Extraction and review
 

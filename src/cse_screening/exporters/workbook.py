@@ -12,6 +12,7 @@ from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 SHEETS = [
+    "00_Universe",
     "01_Screening",
     "02_Raw_Data",
     "03_Ratios",
@@ -75,6 +76,7 @@ def export_all(
     sources: list[dict],
     flags: list[dict],
     review: list[dict],
+    universe: list[dict],
 ) -> dict[str, Path]:
     output.mkdir(parents=True, exist_ok=True)
     safe_group = "_".join(re.findall(r"[A-Za-z0-9]+", industry_group))
@@ -82,10 +84,12 @@ def export_all(
     workbook_path = output / f"{stem}.xlsx"
     csv_path = output / f"{stem}.csv"
     summary_path = output / f"{safe_group}_Summary_{period}.md"
+    universe_path = output / f"{safe_group}_Universe_{period}.csv"
     review_path = output / "manual_review.csv"
     warning_path = output / "extraction_warnings.jsonl"
 
     frames = {
+        "00_Universe": pd.DataFrame(universe),
         "01_Screening": pd.DataFrame(screening),
         "02_Raw_Data": pd.DataFrame(raw),
         "03_Ratios": pd.DataFrame(ratios),
@@ -100,6 +104,7 @@ def export_all(
             frames[sheet].to_excel(writer, sheet_name=sheet, index=False)
         _format_workbook(writer.book)
     frames["01_Screening"].to_csv(csv_path, index=False)
+    frames["00_Universe"].to_csv(universe_path, index=False)
     pd.DataFrame(review).to_csv(review_path, index=False)
     warning_path.write_text(
         "".join(json.dumps(item, default=str) + "\n" for item in review), encoding="utf-8"
@@ -111,6 +116,7 @@ def export_all(
         "xlsx": workbook_path,
         "csv": csv_path,
         "markdown": summary_path,
+        "universe_csv": universe_path,
         "review": review_path,
         "warnings": warning_path,
     }

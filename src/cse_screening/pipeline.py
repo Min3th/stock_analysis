@@ -27,7 +27,7 @@ from .downloaders.announcements import CSEDividendClient, dividend_type
 from .downloaders.financials import CSEFinancialDocumentClient
 from .downloaders.http import CachedDownloader, get_market_data
 from .downloaders.liquidity import LiquidityStore
-from .downloaders.universe import CSEUniverseClient
+from .downloaders.universe import CSEUniverseClient, apply_universe_config
 from .exporters.workbook import export_all
 from .extractors.statements import (
     METRIC_ALIASES,
@@ -95,12 +95,15 @@ def run(
         (root / "config" / "pipeline.example.yml").read_text(encoding="utf-8")
     )
     configured = {item["ticker"]: item for item in config["companies"]}
-    group, companies = CSEUniverseClient().companies(industry_group)
+    as_of = datetime.now(ZoneInfo("Asia/Colombo")).date()
+    group, cse_companies = CSEUniverseClient().companies(industry_group)
+    companies, universe_audit = apply_universe_config(
+        group, cse_companies, config.get("universe"), as_of
+    )
     for issuer in companies:
         if issuer["ticker"] in configured:
-            market_data = issuer["market_data"]
-            issuer.update(configured[issuer["ticker"]])
-            issuer["market_data"] = market_data
+            fallback_documents = configured[issuer["ticker"]].get("documents", [])
+            issuer["documents"] = [*issuer.get("documents", []), *fallback_documents]
     if company:
         companies = [item for item in companies if item["ticker"] == company]
         if not companies:
@@ -116,7 +119,7 @@ def run(
     try:
         discovered, financial_feed_cached = CSEFinancialDocumentClient(
             root / "data" / "raw"
-        ).discover(companies, datetime.now(ZoneInfo("Asia/Colombo")).date())
+        ).discover(companies, as_of)
         for issuer in companies:
             issuer["documents"] = _merge_documents(
                 discovered.get(issuer["ticker"], []), issuer.get("documents", [])
@@ -743,6 +746,7 @@ def run(
         sources,
         _flag_records(screening, flag_context, thresholds),
         review,
+        universe_audit,
     )
 
 

@@ -34,8 +34,9 @@ document discovery -> document registry -> content-addressed local cache
   duplicate facts, and accounting relationships outside stated tolerances.
 - `calculations`: operate only on normalized accepted facts and preserve a list
   of input fact identifiers, formula text, period basis, and calculation notes.
-- `exporters`: create the eight required workbook sheets plus machine-readable
-  CSV, Markdown summary, and `manual_review.csv`.
+- `exporters`: create the eight required screening sheets plus the auditable
+  `00_Universe` membership sheet, machine-readable CSVs, Markdown summary, and
+  `manual_review.csv`.
 
 ## Data contracts
 

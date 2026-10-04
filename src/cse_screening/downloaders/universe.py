@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 from typing import Any
 
 import httpx
@@ -113,6 +114,8 @@ class CSEUniverseClient:
                     "ticker": row["symbol"],
                     "name": row["name"],
                     "sector": group["industry_group"],
+                    "gics_sector": group["sector_name"],
+                    "industry_group": group["industry_group"],
                     "profile_url": "https://www.cse.lk/pages/company-profile/company-profile.component.html"
                     f"?symbol={row['symbol']}",
                     "classification_source_url": GICS_PAGE,
@@ -129,3 +132,77 @@ class CSEUniverseClient:
                 }
             )
         return group, companies
+
+
+def apply_universe_config(
+    group: dict, companies: list[dict], settings: dict | None, as_of: date
+) -> tuple[list[dict], list[dict]]:
+    """Apply explicit membership overlays and return selected issuers plus an audit table."""
+    settings = settings or {}
+    selected = {item["ticker"]: dict(item) for item in companies}
+    decisions = {ticker: "included from CSE classification" for ticker in selected}
+    membership = {ticker: "official_cse" for ticker in selected}
+
+    overrides = settings.get("overrides") or {}
+    for ticker, values in overrides.items():
+        if ticker not in selected:
+            raise ValueError(f"Universe override ticker {ticker!r} is not in the CSE response")
+        selected[ticker].update(values or {})
+        decisions[ticker] = "included from CSE classification with configured metadata override"
+
+    for item in settings.get("include") or []:
+        ticker = item["ticker"]
+        requested_group = item.get("industry_group") or item.get("sector")
+        if requested_group and normalize_group_name(requested_group) != normalize_group_name(
+            group["industry_group"]
+        ):
+            continue
+        if ticker in selected:
+            selected[ticker].update({key: value for key, value in item.items() if key != "ticker"})
+            decisions[ticker] = "explicitly included; also present in CSE classification"
+            membership[ticker] = "configured_include+cse"
+            continue
+        selected[ticker] = {
+            "ticker": ticker,
+            "name": item.get("name") or ticker,
+            "sector": group["industry_group"],
+            "gics_sector": item.get("gics_sector") or group["sector_name"],
+            "industry_group": group["industry_group"],
+            "profile_url": item.get("profile_url")
+            or "https://www.cse.lk/pages/company-profile/company-profile.component.html"
+            f"?symbol={ticker}",
+            "classification_source_url": item.get("classification_source_url")
+            or "config/companies.yml",
+            "documents": item.get("documents", []),
+            "market_data": None,
+        }
+        decisions[ticker] = "explicitly included by configuration"
+        membership[ticker] = "configured_include"
+
+    all_tickers = set(selected)
+    excluded = set(settings.get("exclude") or [])
+    audit = []
+    for ticker in sorted(all_tickers | excluded):
+        issuer = selected.get(ticker)
+        is_included = issuer is not None and ticker not in excluded
+        audit.append(
+            {
+                "Ticker": ticker,
+                "Company": issuer.get("name") if issuer else None,
+                "GICS Sector": issuer.get("gics_sector") if issuer else group["sector_name"],
+                "GICS Industry Group": issuer.get("industry_group")
+                if issuer
+                else group["industry_group"],
+                "CSE Profile URL": issuer.get("profile_url") if issuer else None,
+                "Classification As Of": as_of.isoformat(),
+                "Classification Source URL": issuer.get("classification_source_url")
+                if issuer
+                else GICS_PAGE,
+                "Membership Source": membership.get(ticker, "configured_exclusion_not_present"),
+                "Included": is_included,
+                "Decision": "excluded by configuration"
+                if ticker in excluded
+                else decisions[ticker],
+            }
+        )
+    return [selected[ticker] for ticker in sorted(selected) if ticker not in excluded], audit

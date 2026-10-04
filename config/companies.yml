@@ -1,3 +1,13 @@
+universe:
+  # Exclusions win over both official CSE membership and configured inclusions.
+  exclude: []
+  # Add a company independently of current CSE industry-group membership.
+  # Each entry may also provide name, industry_group, profile_url,
+  # classification_source_url, and fallback documents.
+  include: []
+  # Metadata-only overrides for tickers present in the official CSE response.
+  overrides: {}
+
 companies:
   - ticker: AEL.N0000
     name: ACCESS ENGINEERING PLC
