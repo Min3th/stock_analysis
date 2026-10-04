@@ -210,16 +210,15 @@ def build_snapshot(
         return snapshot
     current_end = date.fromisoformat(str(interim_document["period_end"]))
     interim = _best(interim_facts, usable)
+    income_rejected = False
+    unconfirmed: list[str] = []
     for metric in (*INCOME_FLOWS, *CASH_FLOWS):
         annual, current = snapshot.annual.get(metric), interim.get(metric)
         if annual is None or current is None:
             continue
         stated = current.get("period_months")
         if stated not in (int(months), YEAR_TO_DATE):
-            snapshot.notes.append(
-                f"{metric}: interim columns are not confirmed as the {months}-month year to "
-                "date, so no TTM value is built."
-            )
+            unconfirmed.append(metric)
             continue
         prior = previous_value(current)
         result = ttm_from_annual_and_ytd(
@@ -236,8 +235,10 @@ def build_snapshot(
         if metric == "revenue" and not _plausible_ytd(annual["value"], current["value"], months):
             snapshot.notes.append(
                 "revenue: the interim year-to-date value is out of proportion to the latest "
-                "annual value (possible unit or scope mismatch); no TTM value is built."
+                "annual value (possible unit or scope mismatch); no income TTM values are built."
             )
+            income_rejected = True
+        if income_rejected and metric in INCOME_FLOWS:
             continue
         fact_id = f"{ticker}:TTM:{metric}:{current_end.isoformat()}"
         snapshot.ttm[metric] = {
@@ -267,6 +268,11 @@ def build_snapshot(
                 if metric == "eps"
                 else None,
             }
+        )
+    if unconfirmed:
+        snapshot.notes.append(
+            f"Interim columns are not confirmed as the {months}-month year to date for "
+            f"{', '.join(unconfirmed)}; no TTM value is built for them."
         )
     snapshot.ttm_end = current_end if snapshot.ttm else None
     if _complete(snapshot, INCOME_ANCHORS):
@@ -686,6 +692,9 @@ def screening_metrics(
             None if reported_bvps is not None else shares,
             f"As at {balance_date}" if balance_date else None,
             *bvps_inputs,
+            notes=_market_share_note(annual.get("ordinary_shares_outstanding"))
+            if reported_bvps is None
+            else None,
         )
     )
     values["P/E"] = price_earnings(price, _positive(eps))
@@ -764,6 +773,15 @@ def screening_metrics(
         snapshot.ttm_label() if snapshot.income_basis == "ttm" else fy
     )
     return values, rows
+
+
+def _market_share_note(shares: dict | None) -> str | None:
+    if shares and str(shares.get("extraction_method", "")).startswith("cse_market_data"):
+        return (
+            "Share count is the current count implied by CSE market data, not the count at "
+            "the balance-sheet date."
+        )
+    return None
 
 
 def _join_notes(*notes: str | None) -> str | None:

@@ -75,6 +75,10 @@ PRIMARY_ROWS: dict[str, tuple[str, tuple[str, ...]]] = {
             r"^shareholders'? funds?\b",
         ),
     ),
+    "bvps": (
+        "position",
+        (r"^net assets?(?: value)? per (?:ordinary )?share\b", r"^book value per share\b"),
+    ),
     "cash": (
         "position",
         (

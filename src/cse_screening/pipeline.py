@@ -12,6 +12,7 @@ import yaml
 
 from .calculations.screening import (
     SCREEN_COLUMNS,
+    Snapshot,
     build_snapshot,
     previous_value,
     screening_metrics,
@@ -94,6 +95,15 @@ def run(
     liquidity = liquidity_store.summaries(
         [issuer["ticker"] for issuer in companies], liquidity_lookback
     )
+    threshold = Decimal(str(pipeline_config.get("confidence_threshold", "0.8")))
+    share_classes: dict[str, int] = {}
+    for issuer in companies:
+        symbol = issuer["ticker"].split(".", 1)[0]
+        share_classes[symbol] = share_classes.get(symbol, 0) + 1
+
+    def usable(fact: dict) -> bool:
+        return fact["confidence"] >= threshold
+
     for issuer in companies:
         document_facts: list[tuple[dict, list[dict]]] = []
         one_off_evidence: list[dict] = []
@@ -102,6 +112,30 @@ def run(
             document_errors.append(financial_discovery_error)
         if dividend_error:
             document_errors.append(dividend_error)
+        market = issuer.get("market_data")
+        try:
+            if market is None:
+                market = get_market_data(issuer["ticker"])
+        except (httpx.HTTPError, KeyError, ValueError) as exc:
+            market = {
+                "price": None,
+                "market_cap": None,
+                "share_volume": None,
+                "quantity_issued": None,
+            }
+            document_errors.append(f"market data: {exc}")
+
+        price = _decimal(market.get("price"))
+        market_cap = _decimal(market.get("market_cap"))
+        implied_shares = (market_cap / price).quantize(Decimal(1)) if market_cap and price else None
+        multi_class = share_classes[issuer["ticker"].split(".", 1)[0]] > 1
+        annual_periods = [
+            str(item["period_end"])
+            for item in issuer.get("documents", [])
+            if item["kind"] == "annual_report"
+        ]
+        latest_annual_period = max(annual_periods, default=None)
+        raw_by_id: dict[str, dict] = {}
         for document in issuer.get("documents", []):
             try:
                 path, checksum, cached = downloader.download(
@@ -142,7 +176,16 @@ def run(
                 for candidate in correction_candidates(corrections, issuer["ticker"], document):
                     extracted.append(candidate)
                     applied_corrections.add(candidate["correction_id"])
-                validation_issues = validate_extracted_facts(extracted)
+                is_latest_annual = (
+                    document["kind"] == "annual_report"
+                    and str(document["period_end"]) == latest_annual_period
+                )
+                validation_issues = validate_extracted_facts(
+                    extracted,
+                    implied_shares=implied_shares if is_latest_annual else None,
+                    multi_class=multi_class,
+                    check_per_share=is_latest_annual,
+                )
                 for issue in validation_issues:
                     review.append(
                         {
@@ -192,7 +235,9 @@ def run(
                     )
                     fact["period"] = str(document["period_end"])
                     fact["document"] = document["title"]
-                    raw.append(
+                    raw_by_id[fact["fact_id"]] = record = {}
+                    raw.append(record)
+                    record.update(
                         {
                             "Fact ID": fact["fact_id"],
                             "Company": issuer["name"],
@@ -220,9 +265,10 @@ def run(
                                 "First matching label in the document; review before use.",
                             ),
                             "Correction ID": fact.get("correction_id"),
+                            "Used In Screening": "no",
                         }
                     )
-                    history.extend(_history_rows(issuer, document, fact))
+                    history.extend(_history_rows(issuer, document, fact, threshold))
                 document_facts.append((document, extracted))
             except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
                 document_errors.append(f"{document['title']}: {exc}")
@@ -282,24 +328,21 @@ def run(
                     "Detail Cache Hit": announcement.get("_cache_hit"),
                 }
             )
-        market = issuer.get("market_data")
-        try:
-            if market is None:
-                market = get_market_data(issuer["ticker"])
-        except (httpx.HTTPError, KeyError, ValueError) as exc:
-            market = {
-                "price": None,
-                "market_cap": None,
-                "share_volume": None,
-                "quantity_issued": None,
-            }
-            document_errors.append(f"market data: {exc}")
-
-        price = _decimal(market.get("price"))
         liquidity_summary = liquidity.get(issuer["ticker"], {})
         observations = [item for item in history if item["Ticker"] == issuer["ticker"]]
-        snapshot = build_snapshot(issuer["ticker"], document_facts)
+        market_fact = _market_share_count(
+            issuer, document_facts, latest_annual_period, implied_shares, multi_class, usable
+        )
+        if market_fact is not None:
+            raw_by_id[market_fact["fact_id"]] = record = _market_fact_record(issuer, market_fact)
+            raw.append(record)
+        snapshot = build_snapshot(issuer["ticker"], document_facts, usable)
         metrics, lineage = screening_metrics(snapshot, price, observations)
+        for fact in snapshot.annual.values():
+            raw_by_id[fact["fact_id"]]["Used In Screening"] = "yes"
+        for fact in snapshot.ttm.values():
+            for source in fact["inputs"]:
+                raw_by_id[source["fact_id"]]["Used In Screening"] = "yes (TTM input)"
         ratios.extend(lineage)
         row = {column: None for column in SCREEN_COLUMNS}
         row.update(metrics)
@@ -308,7 +351,7 @@ def run(
                 "Ticker": issuer["ticker"],
                 "Company": issuer["name"],
                 "Current Price": price,
-                "Market Cap": _decimal(market.get("market_cap")),
+                "Market Cap": market_cap,
                 "Recent Volume": market.get("share_volume"),
                 "Average Daily Volume": liquidity_summary.get("average_volume"),
                 "Median Daily Volume": liquidity_summary.get("median_volume"),
@@ -319,12 +362,17 @@ def run(
                     if liquidity_summary.get("period_start")
                     else None
                 ),
-                "Data Confidence": "high"
-                if len(snapshot.annual) >= 8
-                and all(fact["confidence"] >= Decimal("0.8") for fact in snapshot.annual.values())
-                else "review",
+                "Data Confidence": _data_confidence(snapshot, document_facts, threshold),
             }
         )
+        if snapshot.annual_end and (as_of - snapshot.annual_end).days > 548:
+            row["Data Confidence"] = "review" if row["Data Confidence"] == "high" else "low"
+            snapshot.notes.append(
+                f"The latest annual report available is for the year to {snapshot.annual_end}; "
+                "no later annual report was found, so annual metrics are out of date."
+            )
+        if snapshot.annual_months != 12 and row["Data Confidence"] == "high":
+            row["Data Confidence"] = "review"
         for note in snapshot.notes:
             review.append(
                 {
@@ -543,12 +591,132 @@ def _period_length(fact: dict, document: dict) -> str | None:
 HISTORY_METRICS = {"revenue", "net_profit", "eps", "total_equity", "dps", "operating_cash_flow"}
 
 
-def _history_rows(issuer: dict, document: dict, fact: dict) -> list[dict]:
+CORE_METRICS = (
+    "revenue",
+    "net_profit",
+    "eps",
+    "total_assets",
+    "total_equity",
+    "operating_cash_flow",
+)
+
+
+def _data_confidence(
+    snapshot: Snapshot, document_facts: list[tuple[dict, list[dict]]], threshold: Decimal
+) -> str:
+    """Summarise how much of the latest annual report passed validation.
+
+    ``high``: every core metric is usable and nothing in the latest annual
+    report is under review. ``review``: some values were withheld or flagged.
+    ``low``: fewer than half of the core metrics are usable.
+    """
+    core = sum(metric in snapshot.annual for metric in CORE_METRICS)
+    if core < len(CORE_METRICS) / 2:
+        return "low"
+    latest = [
+        facts
+        for document, facts in document_facts
+        if document["kind"] == "annual_report"
+        and snapshot.annual_end is not None
+        and str(document["period_end"]) == snapshot.annual_end.isoformat()
+    ]
+    flagged = any(
+        fact["confidence"] < threshold or fact.get("validation_status") == "review"
+        for facts in latest
+        for fact in facts
+        if fact["metric"] in CORE_METRICS
+    )
+    return "high" if core == len(CORE_METRICS) and not flagged else "review"
+
+
+def _market_share_count(
+    issuer: dict,
+    document_facts: list[tuple[dict, list[dict]]],
+    latest_annual_period: str | None,
+    implied_shares: Decimal | None,
+    multi_class: bool,
+    usable,
+) -> dict | None:
+    """Add the CSE-implied share count when the annual report gives no usable one.
+
+    The count is market capitalisation divided by the last traded price for the
+    listed class. It is not used for an issuer with more than one listed class,
+    because one class is not the whole ordinary share base.
+    """
+    if implied_shares is None or multi_class or latest_annual_period is None:
+        return None
+    for document, facts in document_facts:
+        if document["kind"] != "annual_report":
+            continue
+        if str(document["period_end"]) != latest_annual_period:
+            continue
+        reported = [fact for fact in facts if fact["metric"] == "ordinary_shares_outstanding"]
+        if any(usable(fact) for fact in reported):
+            return None
+        market = issuer.get("market_data") or {}
+        fact = {
+            "metric": "ordinary_shares_outstanding",
+            "value": implied_shares,
+            "original_value": implied_shares,
+            "unit": "shares",
+            "original_unit": "shares",
+            "multiplier": Decimal(1),
+            "page": None,
+            "source_text": "CSE market capitalisation / last traded price",
+            "confidence": Decimal("0.85"),
+            "comparatives": [implied_shares],
+            "extraction_method": "cse_market_data_implied_share_count",
+            "statement_scope": "listed class",
+            "fact_id": f"{issuer['ticker']}:market:ordinary_shares_outstanding",
+            "period": latest_annual_period,
+            "source_url": market.get("market_source_url"),
+            "validation_status": "passed",
+            "notes": (
+                "Current shares in issue implied by CSE market data, used because the "
+                "annual report gave no share count that passed reconciliation. It is a "
+                "current count, not the count at the balance-sheet date."
+            ),
+        }
+        facts.append(fact)
+        return fact
+    return None
+
+
+def _market_fact_record(issuer: dict, fact: dict) -> dict:
+    return {
+        "Fact ID": fact["fact_id"],
+        "Company": issuer["name"],
+        "Ticker": issuer["ticker"],
+        "Financial Period": fact["period"],
+        "Period Length": None,
+        "Metric": fact["metric"],
+        "Extracted Value": fact["value"],
+        "Unit": fact["unit"],
+        "Original Value": fact["original_value"],
+        "Original Unit": fact["original_unit"],
+        "Scale Multiplier": fact["multiplier"],
+        "Source Document": "CSE market data",
+        "Source URL": fact.get("source_url"),
+        "Source Page": None,
+        "Annual/Interim": "market_data",
+        "Statement Scope": fact["statement_scope"],
+        "Extraction Confidence": fact["confidence"],
+        "Extraction Method": fact["extraction_method"],
+        "Validation Status": fact["validation_status"],
+        "Validation Notes": "",
+        "Source Text": fact["source_text"],
+        "Notes": fact["notes"],
+        "Correction ID": None,
+        "Used In Screening": "no",
+    }
+
+
+def _history_rows(issuer: dict, document: dict, fact: dict, threshold: Decimal) -> list[dict]:
     """Annual history observations from a statement's current and comparative columns."""
     if (
         document["kind"] != "annual_report"
         or fact["metric"] not in HISTORY_METRICS
-        or fact["confidence"] < Decimal("0.8")
+        or fact["confidence"] < threshold
         or fact.get("period_months") not in (None, 12)
     ):
         return []

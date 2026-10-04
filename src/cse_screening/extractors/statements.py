@@ -463,7 +463,7 @@ def extract_retained_earnings_note(pages: list[str]) -> dict | None:
 def extract_ordinary_shares(pages: list[str]) -> dict | None:
     """Extract period-end ordinary shares, with weighted average as a labelled fallback."""
     primary = (
-        r"^number of ordinary shares\b",
+        r"^number of ordinary shares\b(?!.*\b(?:denominator|weighted|basic|diluted)\b)",
         r"^number of shares in issue",
         r"^issued ordinary shares as at",
         r"^number of ordinary shares \(voting\) issued",

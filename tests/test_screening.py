@@ -285,3 +285,12 @@ def test_decline_flag_compares_within_each_report():
         ],
     )
     assert consecutive_decline(falling, "T", "eps")
+
+
+def test_values_below_the_confidence_threshold_are_left_out():
+    facts = annual_facts(total_debt=fact("total_debt", 400, 350, confidence="0.62"))
+    snapshot = build_snapshot("T", [(ANNUAL, facts)], lambda item: item["confidence"] >= D("0.8"))
+    values, _rows = screening_metrics(snapshot, D(90), [])
+    assert "total_debt" not in snapshot.annual
+    assert values["Debt-to-Equity"] is None
+    assert values["ROE"] is not None
