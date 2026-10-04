@@ -130,6 +130,14 @@ base LKR, and note references are separated from values. The workbook preserves
 original value/unit/text and the normalized result. Low-confidence or absent
 facts appear in `reports/manual_review.csv` rather than being guessed.
 
+`01_Screening` includes reported operating profit, EBIT, and ordinary shares
+outstanding. EBIT uses an explicitly reported EBIT/profit-before-interest-and-tax
+line when one is accepted; otherwise the displayed EBIT is an operating-profit
+proxy and `03_Ratios` labels that formula and its source fact. Share extraction
+prefers a period-end issued ordinary-share count. A weighted-average share count
+is used only as a lower-confidence, explicitly noted fallback so it is routed to
+manual review rather than silently treated as the period-end balance.
+
 `02_Raw_Data` records the extraction method, validation status, and validation
 notes for every fact. Current validation checks unknown unit/column context,
 the accounting equation (`assets = liabilities + equity`) with a 5% tolerance,

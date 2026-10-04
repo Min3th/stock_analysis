@@ -10,6 +10,10 @@ from ..units import detect_unit, parse_number
 METRIC_ALIASES = {
     "revenue": (r"^revenue(?! reserves)\b", r"^turnover\b"),
     "operating_profit": (r"^profit from operations\b", r"^operating profit\b"),
+    "ebit": (
+        r"^earnings before interest (?:and|&) tax(?:\s*\(ebit\))?\b",
+        r"^profit before interest (?:and|&) tax\b",
+    ),
     "net_profit": (
         r"^profit for the year\b",
         r"^profit for the period\b",
@@ -351,5 +355,74 @@ def extract_retained_earnings_note(pages: list[str]) -> dict | None:
                     "confidence": Decimal("0.92"),
                     "comparatives": values,
                     "notes": "Closing retained earnings from the dedicated equity note.",
+                }
+    return None
+
+
+def extract_ordinary_shares(pages: list[str]) -> dict | None:
+    """Extract period-end ordinary shares, with weighted average as a labelled fallback."""
+    primary = (
+        r"^number of ordinary shares\b",
+        r"^number of shares in issue",
+        r"^issued ordinary shares as at",
+        r"^number of ordinary shares \(voting\) issued",
+    )
+    fallback = (
+        r"weighted average number of ordinary shares(?: in issue| outstanding)?",
+        r"weighted-average number of ordinary shares",
+    )
+    for patterns, confidence, method, note in (
+        (primary, Decimal("0.90"), "period_end_share_count", "Period-end ordinary shares."),
+        (
+            fallback,
+            Decimal("0.78"),
+            "weighted_average_share_count_fallback",
+            "Weighted-average ordinary shares used because no period-end count was identified.",
+        ),
+    ):
+        for page_number, text in enumerate(pages, 1):
+            for line in text.splitlines():
+                cleaned = " ".join(line.split())
+                match = next(
+                    (
+                        result
+                        for pattern in patterns
+                        if (result := re.search(pattern, cleaned, re.IGNORECASE))
+                    ),
+                    None,
+                )
+                if match is None:
+                    continue
+                tail = cleaned[match.end() :]
+                values = [parse_number(item) for item in NUMBER.findall(tail)]
+                values = [item for item in values if item is not None]
+                lowered = cleaned.casefold()
+                if "million" in lowered:
+                    multiplier = Decimal(1000000)
+                elif re.search(r"(?:['‘’]\s*000|no\.\s*['‘’]?000)", cleaned, re.IGNORECASE):
+                    multiplier = Decimal(1000)
+                else:
+                    multiplier = Decimal(1)
+                values = [item for item in values if item != 0]
+                if multiplier == 1000 and len(values) >= 2 and abs(values[0]) <= 200:
+                    values = values[1:]
+                if multiplier == 1:
+                    values = [item for item in values if abs(item) > 2000]
+                if not values:
+                    continue
+                return {
+                    "metric": "ordinary_shares_outstanding",
+                    "value": values[0] * multiplier,
+                    "original_value": values[0],
+                    "unit": "shares",
+                    "original_unit": "million shares"
+                    if multiplier == 1000000
+                    else ("shares '000" if multiplier == 1000 else "shares"),
+                    "multiplier": multiplier,
+                    "page": page_number,
+                    "source_text": cleaned,
+                    "confidence": confidence,
+                    "comparatives": values,
+                    "notes": note,
                 }
     return None

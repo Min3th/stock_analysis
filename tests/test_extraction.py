@@ -3,6 +3,7 @@ from decimal import Decimal as D
 from cse_screening.extractors.statements import (
     extract_interim_flow_metrics,
     extract_metrics,
+    extract_ordinary_shares,
     extract_total_debt,
 )
 
@@ -70,6 +71,37 @@ def test_revenue_reserves_is_not_revenue():
     ]
     facts = {item["metric"]: item for item in extract_metrics(pages)}
     assert facts["revenue"]["value"] == D(10000)
+
+
+def test_explicit_ebit_extraction():
+    pages = [
+        (
+            "STATEMENT OF PROFIT OR LOSS\n"
+            "(In Thousands of Rupees)\n"
+            "Earnings Before Interest and Tax (EBIT) 6,732 7,914"
+        )
+    ]
+    facts = {item["metric"]: item for item in extract_metrics(pages)}
+    assert facts["ebit"]["value"] == D(6732000)
+
+
+def test_period_end_ordinary_shares_preferred_and_normalized():
+    pages = [
+        (
+            "Weighted Average Number of Ordinary Shares (No. '000) 260,966 254,301\n"
+            "Number of Ordinary Shares (No. '000) 278,900 253,546"
+        )
+    ]
+    fact = extract_ordinary_shares(pages)
+    assert fact["value"] == D(278900000)
+    assert fact["notes"] == "Period-end ordinary shares."
+
+
+def test_weighted_average_shares_is_explicit_fallback():
+    pages = ["Weighted average number of ordinary shares in issue ('000) 212,625 212,625"]
+    fact = extract_ordinary_shares(pages)
+    assert fact["value"] == D(212625000)
+    assert fact["confidence"] == D("0.78")
 
 
 def test_total_debt_sums_current_and_non_current_without_leases():

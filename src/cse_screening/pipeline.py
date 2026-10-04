@@ -33,6 +33,7 @@ from .extractors.statements import (
     extract_cash_equivalents,
     extract_interim_flow_metrics,
     extract_metrics,
+    extract_ordinary_shares,
     extract_retained_earnings_note,
     extract_total_debt,
 )
@@ -47,9 +48,12 @@ SCREEN_COLUMNS = [
     "Current Price",
     "Market Cap",
     "Revenue",
+    "Operating Profit",
+    "EBIT",
     "Revenue Growth YoY",
     "Net Profit",
     "EPS",
+    "Ordinary Shares Outstanding",
     "EPS Growth YoY",
     "3Y Revenue CAGR",
     "3Y EPS CAGR",
@@ -153,6 +157,7 @@ def run(
                     (extract_total_debt(pages), "debt_component_aggregation"),
                     (extract_cash_equivalents(pages), "cash_component_aggregation"),
                     (extract_retained_earnings_note(pages), "retained_earnings_note"),
+                    (extract_ordinary_shares(pages), "ordinary_share_count"),
                 )
                 for candidate, method in specialized:
                     if candidate is None:
@@ -389,6 +394,9 @@ def run(
 
         price = _decimal(market.get("price"))
         eps, bvps, dps = value("eps"), value("bvps"), value("dps")
+        operating_profit = value("operating_profit")
+        explicit_ebit = value("ebit")
+        ebit = explicit_ebit if explicit_ebit is not None else operating_profit
 
         def annual_value(key: str, fact_map: dict[str, dict] = annual_facts):
             return fact_map.get(key, {}).get("value")
@@ -420,8 +428,11 @@ def run(
                 "Current Price": price,
                 "Market Cap": _decimal(market.get("market_cap")),
                 "Revenue": value("revenue"),
+                "Operating Profit": operating_profit,
+                "EBIT": ebit,
                 "Net Profit": value("net_profit"),
                 "EPS": eps,
+                "Ordinary Shares Outstanding": value("ordinary_shares_outstanding"),
                 "ROE": roe(annual_profit_attributable, ordinary_equity, ordinary_equity_previous),
                 "ROA": roa(
                     annual_value("net_profit"),
@@ -451,6 +462,25 @@ def run(
         _add_growth_metrics(row, issuer["ticker"], history)
         row["Flags"] = "; ".join(company_flags(row, thresholds))
         screening.append(row)
+        ebit_input = facts.get("ebit") or facts.get("operating_profit")
+        ratios.append(
+            {
+                "Ticker": issuer["ticker"],
+                "Metric": "EBIT",
+                "Value": ebit,
+                "Formula": "Explicit reported EBIT"
+                if explicit_ebit is not None
+                else "Operating profit used as EBIT proxy",
+                "Numerator": ebit,
+                "Denominator": None,
+                "Input Fact IDs": ebit_input["fact_id"] if ebit_input else "",
+                "Source Pages": str(ebit_input["page"]) if ebit_input else "",
+                "Period Basis": ebit_input["period"] if ebit_input else None,
+                "Notes": None
+                if explicit_ebit is not None
+                else "Proxy is explicitly labelled; no reported EBIT line was accepted.",
+            }
+        )
         for metric in ("P/E", "P/B", "Dividend Yield", "Payout Ratio", "Earnings Yield"):
             input_names = {
                 "P/E": ("Current Price", "EPS"),
@@ -553,7 +583,8 @@ def run(
                     "Period Basis": max((item["period"] for item in input_facts), default=None),
                 }
             )
-        missing = [metric for metric in METRIC_ALIASES if metric not in facts]
+        required_metrics = [*METRIC_ALIASES, "ordinary_shares_outstanding"]
+        missing = [metric for metric in required_metrics if metric not in facts]
         if not issuer.get("documents"):
             document_errors.append(
                 "No official financial document URLs are configured yet; market data only"
