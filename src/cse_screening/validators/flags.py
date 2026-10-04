@@ -61,11 +61,15 @@ def company_flags(
         flags.append("negative equity")
     if row.get("Payout Ratio") is not None and row["Payout Ratio"] > 1:
         flags.append("dividend payout above 100%")
-    volume = row.get("Recent Volume")
-    if volume is None:
-        flags.append("trading liquidity unavailable")
-    elif Decimal(str(volume)) <= _threshold(thresholds, "low_liquidity_daily_volume", "10000"):
-        flags.append("low trading liquidity (current-volume snapshot)")
+    average_volume = row.get("Average Daily Volume")
+    observations = int(row.get("Liquidity Trading Days") or 0)
+    minimum = int(thresholds.get("liquidity_minimum_observations", 5))
+    if average_volume is None or observations < minimum:
+        flags.append(f"multi-day liquidity unavailable ({observations}/{minimum} observations)")
+    elif Decimal(str(average_volume)) <= _threshold(
+        thresholds, "low_liquidity_average_daily_volume", "10000"
+    ):
+        flags.append("low trading liquidity (average daily volume)")
     if one_off_evidence:
         flags.append("possible one-off profit or loss")
     return flags

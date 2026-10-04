@@ -17,5 +17,7 @@ flags:
   pe_sector_median_multiple: 2.0
   pb_sector_median_low_multiple: 0.5
   pb_sector_median_high_multiple: 2.0
-  low_liquidity_daily_volume: 10000
+  liquidity_lookback_trading_days: 20
+  liquidity_minimum_observations: 5
+  low_liquidity_average_daily_volume: 10000
 

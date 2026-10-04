@@ -26,6 +26,7 @@ from .corrections import correction_candidates, load_corrections
 from .downloaders.announcements import CSEDividendClient, dividend_type
 from .downloaders.financials import CSEFinancialDocumentClient
 from .downloaders.http import CachedDownloader, get_market_data
+from .downloaders.liquidity import LiquidityStore
 from .downloaders.universe import CSEUniverseClient
 from .exporters.workbook import export_all
 from .extractors.statements import (
@@ -72,6 +73,10 @@ SCREEN_COLUMNS = [
     "Dividend Yield",
     "Payout Ratio",
     "Earnings Yield",
+    "Average Daily Volume",
+    "Median Daily Volume",
+    "Liquidity Trading Days",
+    "Liquidity Period",
     "Latest Financial Period",
     "Data Confidence",
     "Flags",
@@ -127,6 +132,12 @@ def run(
         dividend_announcements = {}
         dividend_error = f"CSE dividend announcement feed: {exc}"
     thresholds = yaml.safe_load((root / "config" / "pipeline.example.yml").read_text())["flags"]
+    liquidity_lookback = int(thresholds.get("liquidity_lookback_trading_days", 20))
+    liquidity_store = LiquidityStore(root / "data" / "raw")
+    liquidity_store.capture(companies)
+    liquidity = liquidity_store.summaries(
+        [issuer["ticker"] for issuer in companies], liquidity_lookback
+    )
     for issuer in companies:
         facts: dict[str, dict] = {}
         annual_facts: dict[str, dict] = {}
@@ -411,6 +422,7 @@ def run(
             return fact_map.get(key, {}).get("value")
 
         price = _decimal(market.get("price"))
+        liquidity_summary = liquidity.get(issuer["ticker"], {})
         eps, bvps, dps = value("eps"), value("bvps"), value("dps")
         operating_profit = value("operating_profit")
         explicit_ebit = value("ebit")
@@ -469,6 +481,15 @@ def run(
                 "Dividend Yield": dividend_yield(dps, price),
                 "Payout Ratio": payout_ratio(dps, eps),
                 "Earnings Yield": (eps / price if eps is not None and price else None),
+                "Average Daily Volume": liquidity_summary.get("average_volume"),
+                "Median Daily Volume": liquidity_summary.get("median_volume"),
+                "Liquidity Trading Days": liquidity_summary.get("observations"),
+                "Liquidity Period": (
+                    f"{liquidity_summary.get('period_start')} to "
+                    f"{liquidity_summary.get('period_end')}"
+                    if liquidity_summary.get("period_start")
+                    else None
+                ),
                 "Latest Financial Period": max((v["period"] for v in facts.values()), default=None),
                 "Recent Volume": market.get("share_volume"),
                 "Data Confidence": "high"
@@ -491,6 +512,21 @@ def run(
             "one_off_evidence": one_off_evidence,
             "total_equity": annual_value("total_equity"),
         }
+        sources.append(
+            {
+                "Company": issuer["name"],
+                "Ticker": issuer["ticker"],
+                "Document": "CSE daily trading-volume snapshots",
+                "Type": "market_liquidity_history",
+                "Period End": liquidity_summary.get("period_end"),
+                "Source URL": liquidity_summary.get("source_url"),
+                "Local Path": str(root / "data" / "raw" / "market_liquidity"),
+                "Notes": (
+                    f"{liquidity_summary.get('observations', 0)} of "
+                    f"{liquidity_lookback} requested trading-day observations"
+                ),
+            }
+        )
         screening.append(row)
         ebit_input = facts.get("ebit") or facts.get("operating_profit")
         ratios.append(
@@ -741,8 +777,10 @@ def _flag_records(rows: list[dict], contexts: dict[str, dict], thresholds: dict)
                 evidence = f"P/B={row.get('P/B')}; positive sector median={pb_median}"
             elif "liquidity" in flag:
                 evidence = (
-                    f"Current volume={row.get('Recent Volume')}; low-volume threshold="
-                    f"{thresholds.get('low_liquidity_daily_volume', 10000)}"
+                    f"Average daily volume={row.get('Average Daily Volume')}; "
+                    f"observations={row.get('Liquidity Trading Days')}; period="
+                    f"{row.get('Liquidity Period')}; low-volume threshold="
+                    f"{thresholds.get('low_liquidity_average_daily_volume', 10000)}"
                 )
             elif flag == "possible one-off profit or loss":
                 items = context.get("one_off_evidence", [])

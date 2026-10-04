@@ -157,12 +157,16 @@ and reason to both review outputs.
 `07_Flags` contains one evidence row per descriptive anomaly. Rules cover
 negative EPS/equity/operating cash flow, two consecutive annual declines in EPS
 or revenue, weak cash conversion, high debt-to-equity, payout above 100%,
-positive P/E and P/B outliers relative to their sector medians, current-day low
-or unavailable trading volume, and explicit one-off/non-recurring profit or loss
-wording. Thresholds are configured under `flags` in
-`config/pipeline.example.yml`. The liquidity rule is deliberately labelled as a
-current-volume snapshot; it is not represented as a multi-day average. One-off
-flags retain the report, URL, page, and matching excerpt for analyst review.
+positive P/E and P/B outliers relative to their sector medians, multi-day low
+or insufficient trading-volume history, and explicit one-off/non-recurring
+profit or loss wording. Thresholds are configured under `flags` in
+`config/pipeline.example.yml`. Liquidity uses average and median volume from the
+latest 20 locally captured CSE trading-day observations. A run upserts the
+official volume for the CSE trading date under `data/raw/market_liquidity/`;
+same-day reruns do not create duplicates. Until the configured minimum sample is
+available, the result is explicitly flagged as insufficient multi-day history
+instead of treating one day as representative. One-off flags retain the report,
+URL, page, and matching excerpt for analyst review.
 
 For a manual correction, first verify the consolidated/group column, unit,
 period, and page in the cited PDF. Copy the unresolved item into
@@ -232,6 +236,10 @@ they are never used as company-specific facts.
   dividends in that feed matching the selected universe and caches their PDFs.
 - CSE's public market endpoint is operational but undocumented; failures become
   review items rather than silent gaps.
+- CSE does not expose a stable public per-security historical-volume endpoint.
+  Multi-day liquidity therefore accumulates from official daily snapshots across
+  runs. Run the pipeline after each trading day (or on a daily schedule) to build
+  the configured 20-day window; the default minimum is five observations.
 
 ## Milestone plan
 

@@ -34,11 +34,13 @@ def test_company_flags_cover_required_absolute_anomalies():
         "Debt-to-Equity": D(3),
         "Payout Ratio": D("1.2"),
         "Recent Volume": D(100),
+        "Average Daily Volume": D(100),
+        "Liquidity Trading Days": 20,
     }
     history = [*_history("eps", ["1", "2", "3"]), *_history("revenue", ["4", "5", "6"])]
     flags = company_flags(
         row,
-        {"low_liquidity_daily_volume": 10000},
+        {"low_liquidity_average_daily_volume": 10000},
         history=history,
         total_equity=D(-5),
         one_off_evidence=[{"page": 1}],
@@ -52,7 +54,7 @@ def test_company_flags_cover_required_absolute_anomalies():
         "high debt-to-equity",
         "negative equity",
         "dividend payout above 100%",
-        "low trading liquidity (current-volume snapshot)",
+        "low trading liquidity (average daily volume)",
         "possible one-off profit or loss",
     }
 
@@ -72,3 +74,13 @@ def test_sector_relative_valuation_flags_use_positive_medians():
     ]
     assert flags["LOW"] == ["P/B unusually low relative to sector median"]
     assert flags["NEG"] == []
+
+
+def test_liquidity_is_unavailable_until_minimum_multi_day_sample_exists():
+    row = {
+        "Ticker": "TEST.N0000",
+        "Average Daily Volume": D(50000),
+        "Liquidity Trading Days": 2,
+    }
+    flags = company_flags(row, {"liquidity_minimum_observations": 5})
+    assert "multi-day liquidity unavailable (2/5 observations)" in flags

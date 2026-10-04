@@ -49,7 +49,13 @@ FINANCIAL_COLUMNS = {
     "Prior YTD",
 }
 PER_SHARE_COLUMNS = {"Current Price", "EPS", "DPS", "Voting DPS", "Non-Voting DPS"}
-INTEGER_COLUMNS = {"Ordinary Shares Outstanding", "Recent Volume"}
+INTEGER_COLUMNS = {
+    "Ordinary Shares Outstanding",
+    "Recent Volume",
+    "Average Daily Volume",
+    "Median Daily Volume",
+    "Liquidity Trading Days",
+}
 RATIO_COLUMNS = {"P/E", "P/B", "Debt-to-Equity", "OCF / Net Profit"}
 FINANCIAL_FORMAT = "#,##0;[Red](#,##0);-"
 PER_SHARE_FORMAT = "#,##0.00;[Red](#,##0.00);-"
@@ -306,6 +312,7 @@ def _neutral_markdown_summary(
         "Free Cash Flow",
         "DPS",
         "Recent Volume",
+        "Average Daily Volume",
     )
     lines += ["", "## Highest and lowest observed values", ""]
     for metric in observed_metrics:
