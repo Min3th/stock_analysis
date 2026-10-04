@@ -95,6 +95,9 @@ tests/                   unit and end-to-end fixture tests
 
 See [architecture.md](docs/architecture.md) for the component flow and
 [technical-risks.md](docs/technical-risks.md) for the initial risk register.
+AI coding agents continuing development should begin with
+[AGENTS.md](AGENTS.md), which records project invariants, validation gates, and
+the expected handoff format for each committed stage.
 
 ## Domain references
 
