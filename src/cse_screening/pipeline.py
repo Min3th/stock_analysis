@@ -31,13 +31,8 @@ from .downloaders.universe import CSEUniverseClient, apply_universe_config
 from .exporters.workbook import export_all
 from .extractors.statements import (
     METRIC_ALIASES,
-    extract_cash_equivalents,
-    extract_interim_flow_metrics,
-    extract_metrics,
+    extract_document_metrics,
     extract_one_off_indicators,
-    extract_ordinary_shares,
-    extract_retained_earnings_note,
-    extract_total_debt,
 )
 from .parsers.pdf import extract_document
 from .periods import TTM_FLOW_METRICS, ttm_from_annual_and_ytd
@@ -186,40 +181,11 @@ def run(
                                 "url": document["url"],
                             }
                         )
-                extracted = extract_metrics(pages)
+                extracted = extract_document_metrics(pages, document["kind"])
                 for candidate in extracted:
                     page_method = parsed.methods[candidate["page"] - 1]
-                    candidate.setdefault("extraction_method", f"statement_label_line+{page_method}")
-                if document["kind"] == "interim_statement":
-                    for candidate in extract_interim_flow_metrics(pages):
-                        page_method = parsed.methods[candidate["page"] - 1]
-                        candidate["extraction_method"] = f"interim_same_scope_columns+{page_method}"
-                        existing = next(
-                            (item for item in extracted if item["metric"] == candidate["metric"]),
-                            None,
-                        )
-                        if existing is not None:
-                            extracted.remove(existing)
-                        extracted.append(candidate)
-                specialized = (
-                    (extract_total_debt(pages), "debt_component_aggregation"),
-                    (extract_cash_equivalents(pages), "cash_component_aggregation"),
-                    (extract_retained_earnings_note(pages), "retained_earnings_note"),
-                    (extract_ordinary_shares(pages), "ordinary_share_count"),
-                )
-                for candidate, method in specialized:
-                    if candidate is None:
-                        continue
-                    page_method = parsed.methods[candidate["page"] - 1]
-                    candidate["extraction_method"] = f"{method}+{page_method}"
-                    existing = next(
-                        (item for item in extracted if item["metric"] == candidate["metric"]), None
-                    )
-                    if existing is None:
-                        extracted.append(candidate)
-                    elif candidate["confidence"] > existing["confidence"]:
-                        extracted.remove(existing)
-                        extracted.append(candidate)
+                    strategy = candidate.get("extraction_method", "statement_label_line")
+                    candidate["extraction_method"] = f"{strategy}+{page_method}"
                 for candidate in correction_candidates(corrections, issuer["ticker"], document):
                     extracted.append(candidate)
                     applied_corrections.add(candidate["correction_id"])
