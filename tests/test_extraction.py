@@ -3,6 +3,7 @@ from decimal import Decimal as D
 from cse_screening.extractors.statements import (
     extract_interim_flow_metrics,
     extract_metrics,
+    extract_one_off_indicators,
     extract_ordinary_shares,
     extract_total_debt,
 )
@@ -71,6 +72,18 @@ def test_revenue_reserves_is_not_revenue():
     ]
     facts = {item["metric"]: item for item in extract_metrics(pages)}
     assert facts["revenue"]["value"] == D(10000)
+
+
+def test_one_off_indicator_requires_explicit_phrase_and_profit_or_loss_context():
+    pages = [
+        (
+            "The one-off disposal gain increased profit for the year.\n"
+            "A one-off system migration was completed."
+        )
+    ]
+    indicators = extract_one_off_indicators(pages)
+    assert len(indicators) == 1
+    assert indicators[0]["page"] == 1
 
 
 def test_explicit_ebit_extraction():

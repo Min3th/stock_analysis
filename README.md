@@ -146,6 +146,16 @@ reported value, lowers its confidence, changes its validation status to
 `review`, and writes the candidate values, page, source text, strategy, rule,
 and reason to both review outputs.
 
+`07_Flags` contains one evidence row per descriptive anomaly. Rules cover
+negative EPS/equity/operating cash flow, two consecutive annual declines in EPS
+or revenue, weak cash conversion, high debt-to-equity, payout above 100%,
+positive P/E and P/B outliers relative to their sector medians, current-day low
+or unavailable trading volume, and explicit one-off/non-recurring profit or loss
+wording. Thresholds are configured under `flags` in
+`config/pipeline.example.yml`. The liquidity rule is deliberately labelled as a
+current-volume snapshot; it is not represented as a multi-day average. One-off
+flags retain the report, URL, page, and matching excerpt for analyst review.
+
 For a manual correction, first verify the consolidated/group column, unit,
 period, and page in the cited PDF. Copy the unresolved item into
 `config/corrections.yml` using this form:

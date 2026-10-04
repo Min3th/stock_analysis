@@ -51,6 +51,28 @@ METRIC_ALIASES = {
 NUMBER = re.compile(r"\(?-?[\d,]+(?:\.\d+)?\)?")
 
 
+def extract_one_off_indicators(pages: list[str]) -> list[dict]:
+    """Find explicit one-off/non-recurring profit or loss wording for review."""
+    phrase = re.compile(
+        r"\b(?:one[- ]off|non[- ]recurring)\b|"
+        r"\bexceptional\s+(?:item|gain|loss|charge|income|expense)s?\b",
+        re.IGNORECASE,
+    )
+    outcome = re.compile(r"\b(?:profit|loss|gain|earnings|income|expense|charge)\b", re.IGNORECASE)
+    results = []
+    for page_number, text in enumerate(pages, 1):
+        for line in text.splitlines():
+            cleaned = " ".join(line.split())
+            match = phrase.search(cleaned)
+            if match and outcome.search(cleaned):
+                start, end = max(0, match.start() - 180), min(len(cleaned), match.end() + 220)
+                excerpt = cleaned[start:end]
+                results.append({"page": page_number, "source_text": excerpt})
+                if len(results) == 3:
+                    return results
+    return results
+
+
 def candidate_pages(pages: list[str]) -> list[tuple[int, str]]:
     headings = (
         "statement of profit or loss",

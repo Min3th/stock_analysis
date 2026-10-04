@@ -33,6 +33,7 @@ from .extractors.statements import (
     extract_cash_equivalents,
     extract_interim_flow_metrics,
     extract_metrics,
+    extract_one_off_indicators,
     extract_ordinary_shares,
     extract_retained_earnings_note,
     extract_total_debt,
@@ -40,7 +41,7 @@ from .extractors.statements import (
 from .parsers.pdf import extract_pages
 from .periods import TTM_FLOW_METRICS, ttm_from_annual_and_ytd
 from .validators.extraction import validate_extracted_facts
-from .validators.flags import company_flags
+from .validators.flags import company_flags, sector_relative_flags
 
 SCREEN_COLUMNS = [
     "Ticker",
@@ -116,6 +117,7 @@ def run(
         financial_discovery_error = f"CSE financial filing discovery: {exc}"
     downloader = CachedDownloader(root / "data" / "raw")
     raw, sources, screening, ratios, history, review, dividends = [], [], [], [], [], [], []
+    flag_context: dict[str, dict] = {}
     dividend_error = None
     try:
         dividend_announcements = CSEDividendClient(root / "data" / "raw").latest_for_companies(
@@ -129,6 +131,7 @@ def run(
         facts: dict[str, dict] = {}
         annual_facts: dict[str, dict] = {}
         document_facts: list[tuple[dict, list[dict]]] = []
+        one_off_evidence: list[dict] = []
         document_errors: list[str] = []
         if financial_discovery_error:
             document_errors.append(financial_discovery_error)
@@ -140,6 +143,15 @@ def run(
                     issuer["ticker"], document["url"], document["title"]
                 )
                 pages = extract_pages(path)
+                if document["kind"] == "annual_report":
+                    for evidence in extract_one_off_indicators(pages):
+                        one_off_evidence.append(
+                            {
+                                **evidence,
+                                "document": document["title"],
+                                "url": document["url"],
+                            }
+                        )
                 extracted = extract_metrics(pages)
                 for candidate in extracted:
                     candidate.setdefault("extraction_method", "statement_label_line")
@@ -466,7 +478,19 @@ def run(
             }
         )
         _add_growth_metrics(row, issuer["ticker"], history)
-        row["Flags"] = "; ".join(company_flags(row, thresholds))
+        row["Flags"] = "; ".join(
+            company_flags(
+                row,
+                thresholds,
+                history=_deduplicate_history(history),
+                total_equity=annual_value("total_equity"),
+                one_off_evidence=one_off_evidence,
+            )
+        )
+        flag_context[issuer["ticker"]] = {
+            "one_off_evidence": one_off_evidence,
+            "total_equity": annual_value("total_equity"),
+        }
         screening.append(row)
         ebit_input = facts.get("ebit") or facts.get("operating_profit")
         ratios.append(
@@ -627,6 +651,11 @@ def run(
                     "Reason for Uncertainty": error,
                 }
             )
+    relative_flags = sector_relative_flags(screening, thresholds)
+    for row in screening:
+        existing = [item for item in row["Flags"].split("; ") if item]
+        row["Flags"] = "; ".join([*existing, *relative_flags[row["Ticker"]]])
+
     selected_tickers = {item["ticker"] for item in companies}
     unapplied = [
         item["id"]
@@ -651,13 +680,88 @@ def run(
         history,
         dividends,
         sources,
-        [{"Ticker": row["Ticker"], "Flags": row["Flags"]} for row in screening],
+        _flag_records(screening, flag_context, thresholds),
         review,
     )
 
 
 def _decimal(value) -> Decimal | None:
     return None if value is None else Decimal(str(value))
+
+
+def _flag_records(rows: list[dict], contexts: dict[str, dict], thresholds: dict) -> list[dict]:
+    """Expand the compact screening flags into auditable flag-sheet rows."""
+    pe_values = sorted(row["P/E"] for row in rows if row.get("P/E") is not None and row["P/E"] > 0)
+    pb_values = sorted(row["P/B"] for row in rows if row.get("P/B") is not None and row["P/B"] > 0)
+
+    def midpoint(values: list[Decimal]) -> Decimal | None:
+        if not values:
+            return None
+        middle = len(values) // 2
+        return (
+            values[middle]
+            if len(values) % 2
+            else (values[middle - 1] + values[middle]) / Decimal(2)
+        )
+
+    pe_median, pb_median = midpoint(pe_values), midpoint(pb_values)
+    output = []
+    for row in rows:
+        context = contexts.get(row["Ticker"], {})
+        for flag in (item for item in row.get("Flags", "").split("; ") if item):
+            evidence = ""
+            source_pages = ""
+            source_documents = ""
+            source_urls = ""
+            if flag == "negative EPS":
+                evidence = f"EPS={row.get('EPS')}"
+            elif flag.startswith("declining EPS"):
+                evidence = "Latest three consecutive annual EPS observations decline"
+            elif flag.startswith("declining revenue"):
+                evidence = "Latest three consecutive annual revenue observations decline"
+            elif flag == "negative operating cash flow":
+                evidence = f"Operating Cash Flow={row.get('Operating Cash Flow')}"
+            elif flag == "operating cash flow materially below net profit":
+                evidence = (
+                    f"OCF/Net Profit={row.get('OCF / Net Profit')}; threshold="
+                    f"{thresholds.get('ocf_to_net_profit_low', 0.7)}"
+                )
+            elif flag == "high debt-to-equity":
+                evidence = (
+                    f"Debt-to-Equity={row.get('Debt-to-Equity')}; threshold="
+                    f"{thresholds.get('high_debt_to_equity', 2)}"
+                )
+            elif flag == "negative equity":
+                evidence = f"Total Equity={context.get('total_equity')}"
+            elif flag == "dividend payout above 100%":
+                evidence = f"Payout Ratio={row.get('Payout Ratio')}"
+            elif flag.startswith("P/E unusually"):
+                evidence = f"P/E={row.get('P/E')}; positive sector median={pe_median}"
+            elif flag.startswith("P/B unusually"):
+                evidence = f"P/B={row.get('P/B')}; positive sector median={pb_median}"
+            elif "liquidity" in flag:
+                evidence = (
+                    f"Current volume={row.get('Recent Volume')}; low-volume threshold="
+                    f"{thresholds.get('low_liquidity_daily_volume', 10000)}"
+                )
+            elif flag == "possible one-off profit or loss":
+                items = context.get("one_off_evidence", [])
+                evidence = " | ".join(item["source_text"] for item in items)
+                source_pages = "; ".join(str(item["page"]) for item in items)
+                source_documents = "; ".join(item["document"] for item in items)
+                source_urls = "; ".join(item["url"] for item in items)
+            output.append(
+                {
+                    "Ticker": row["Ticker"],
+                    "Company": row["Company"],
+                    "Flag": flag,
+                    "Evidence": evidence,
+                    "Source Documents": source_documents,
+                    "Source URLs": source_urls,
+                    "Source Pages": source_pages,
+                }
+            )
+    return output
 
 
 def _prior_year_end(period_end: date, offset: int) -> date:
