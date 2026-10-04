@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -54,6 +55,7 @@ def export_all(
     csv_path = output / f"{stem}.csv"
     summary_path = output / f"{safe_group}_Summary_{period}.md"
     review_path = output / "manual_review.csv"
+    warning_path = output / "extraction_warnings.jsonl"
 
     frames = {
         "01_Screening": pd.DataFrame(screening),
@@ -71,10 +73,19 @@ def export_all(
         _format_workbook(writer.book)
     frames["01_Screening"].to_csv(csv_path, index=False)
     pd.DataFrame(review).to_csv(review_path, index=False)
+    warning_path.write_text(
+        "".join(json.dumps(item, default=str) + "\n" for item in review), encoding="utf-8"
+    )
     summary_path.write_text(
         _neutral_markdown_summary(period, industry_group, screening, review), encoding="utf-8"
     )
-    return {"xlsx": workbook_path, "csv": csv_path, "markdown": summary_path, "review": review_path}
+    return {
+        "xlsx": workbook_path,
+        "csv": csv_path,
+        "markdown": summary_path,
+        "review": review_path,
+        "warnings": warning_path,
+    }
 
 
 def _format_workbook(workbook) -> None:

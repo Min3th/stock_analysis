@@ -104,6 +104,7 @@ def correction_candidates(corrections: list[dict], ticker: str, document: dict) 
                 "comparatives": [value],
                 "correction_id": str(item["id"]),
                 "statement_scope": item["statement_scope"],
+                "extraction_method": "manual_correction_overlay",
                 "notes": (
                     f"Manual correction by {item['author']} on {item['corrected_at']}: "
                     f"{item['reason']}"

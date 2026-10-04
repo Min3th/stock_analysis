@@ -80,6 +80,20 @@ document discovery -> document registry -> content-addressed local cache
 - Annual return/cash-flow ratios use facts from the same annual report and are
   not mixed with a newer interim period.
 
+## Extraction validation and review
+
+Each accepted raw fact carries its extraction strategy, validation status, and
+validation notes. Document-level validators currently test whether unit/column
+context supports high confidence, whether assets reconcile to liabilities plus
+equity within 5%, and whether net profit is on a plausible scale relative to
+revenue. Validation warnings preserve the extracted value but reduce confidence.
+
+Every warning is emitted with candidate values, source page/text, strategy,
+validation rule, and reason to `manual_review.csv` and the line-delimited
+`extraction_warnings.jsonl`. Missing metrics and document/network failures use
+the same structured schema. This lets automated consumers distinguish absence,
+ambiguous extraction, accounting inconsistency, and source failure.
+
 ## Source policy
 
 Official CSE disclosures are preferred, followed by official company investor

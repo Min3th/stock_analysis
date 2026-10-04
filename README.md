@@ -56,6 +56,10 @@ Official CSE cash-dividend announcements are discovered on every run. Their
 structured details are cached under `data/raw/cse_announcements/`, attachments
 under the issuer cache, and results are written to `05_Dividends`.
 
+Each run also writes `reports/extraction_warnings.jsonl`. This machine-readable
+log mirrors missing, low-confidence, validation, and document-error records from
+`manual_review.csv`.
+
 ## Structure
 
 ```text
@@ -126,6 +130,14 @@ base LKR, and note references are separated from values. The workbook preserves
 original value/unit/text and the normalized result. Low-confidence or absent
 facts appear in `reports/manual_review.csv` rather than being guessed.
 
+`02_Raw_Data` records the extraction method, validation status, and validation
+notes for every fact. Current validation checks unknown unit/column context,
+the accounting equation (`assets = liabilities + equity`) with a 5% tolerance,
+and extreme profit-to-revenue scale conflicts. A failed check preserves the
+reported value, lowers its confidence, changes its validation status to
+`review`, and writes the candidate values, page, source text, strategy, rule,
+and reason to both review outputs.
+
 For a manual correction, first verify the consolidated/group column, unit,
 period, and page in the cited PDF. Copy the unresolved item into
 `config/corrections.yml` using this form:
@@ -171,6 +183,10 @@ they are never used as company-specific facts.
   wired into the parser.
 - Current/prior Group values are accepted only when column order is reliable.
   Three-year history remains null when scope cannot be proven.
+- Validation is intentionally conservative and does not prove that a value is
+  correct. Holding-company presentations and unusual classifications can trigger
+  review even when reported correctly; use the cited page and correction overlay
+  to resolve those cases.
 - Automatic discovery selects one latest annual and one latest interim report
   per issuer. Errata, prospectuses, trust deeds, articles, and accountants'
   reports are excluded; unusual CSE titles that contain no recognizable period

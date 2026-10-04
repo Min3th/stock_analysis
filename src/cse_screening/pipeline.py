@@ -38,6 +38,7 @@ from .extractors.statements import (
 )
 from .parsers.pdf import extract_pages
 from .periods import TTM_FLOW_METRICS, ttm_from_annual_and_ytd
+from .validators.extraction import validate_extracted_facts
 from .validators.flags import company_flags
 
 SCREEN_COLUMNS = [
@@ -136,8 +137,11 @@ def run(
                 )
                 pages = extract_pages(path)
                 extracted = extract_metrics(pages)
+                for candidate in extracted:
+                    candidate.setdefault("extraction_method", "statement_label_line")
                 if document["kind"] == "interim_statement":
                     for candidate in extract_interim_flow_metrics(pages):
+                        candidate["extraction_method"] = "interim_same_scope_columns"
                         existing = next(
                             (item for item in extracted if item["metric"] == candidate["metric"]),
                             None,
@@ -146,13 +150,14 @@ def run(
                             extracted.remove(existing)
                         extracted.append(candidate)
                 specialized = (
-                    extract_total_debt(pages),
-                    extract_cash_equivalents(pages),
-                    extract_retained_earnings_note(pages),
+                    (extract_total_debt(pages), "debt_component_aggregation"),
+                    (extract_cash_equivalents(pages), "cash_component_aggregation"),
+                    (extract_retained_earnings_note(pages), "retained_earnings_note"),
                 )
-                for candidate in specialized:
+                for candidate, method in specialized:
                     if candidate is None:
                         continue
+                    candidate["extraction_method"] = method
                     existing = next(
                         (item for item in extracted if item["metric"] == candidate["metric"]), None
                     )
@@ -164,6 +169,23 @@ def run(
                 for candidate in correction_candidates(corrections, issuer["ticker"], document):
                     extracted.append(candidate)
                     applied_corrections.add(candidate["correction_id"])
+                validation_issues = validate_extracted_facts(extracted)
+                for issue in validation_issues:
+                    review.append(
+                        {
+                            "Company": issuer["name"],
+                            "Ticker": issuer["ticker"],
+                            "Metric": issue["metric"],
+                            "Financial Period": str(document["period_end"]),
+                            "Candidate Values": issue["candidate_values"],
+                            "Source Document": document["title"],
+                            "Source Page": issue["source_page"],
+                            "Source Text": issue["source_text"],
+                            "Extraction Strategy": issue["strategy"],
+                            "Validation Rule": issue["rule"],
+                            "Reason for Uncertainty": issue["reason"],
+                        }
+                    )
                 doc_id = checksum[:16]
                 sources.append(
                     {
@@ -206,6 +228,9 @@ def run(
                         "Source Page": fact["page"],
                         "Annual/Interim": document["kind"],
                         "Extraction Confidence": fact["confidence"],
+                        "Extraction Method": fact.get("extraction_method", "unknown"),
+                        "Validation Status": fact.get("validation_status", "not_run"),
+                        "Validation Notes": fact.get("validation_notes", ""),
                         "Source Text": fact["source_text"],
                         "Notes": fact.get(
                             "notes",
@@ -541,8 +566,11 @@ def run(
                     "Metric": metric,
                     "Financial Period": row["Latest Financial Period"],
                     "Candidate Values": "",
+                    "Source Document": "",
                     "Source Page": "",
                     "Source Text": "",
+                    "Extraction Strategy": "",
+                    "Validation Rule": "missing_metric",
                     "Reason for Uncertainty": "No reliable label/number candidate found",
                 }
             )
@@ -554,8 +582,11 @@ def run(
                     "Metric": "document",
                     "Financial Period": "",
                     "Candidate Values": "",
+                    "Source Document": "",
                     "Source Page": "",
                     "Source Text": "",
+                    "Extraction Strategy": "",
+                    "Validation Rule": "document_error",
                     "Reason for Uncertainty": error,
                 }
             )
