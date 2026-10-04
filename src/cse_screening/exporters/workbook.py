@@ -11,6 +11,8 @@ from openpyxl.formatting.rule import CellIsRule, ColorScaleRule
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from ..periods import file_period_label
+
 SHEETS = [
     "00_Universe",
     "01_Screening",
@@ -84,14 +86,16 @@ def export_all(
     flags: list[dict],
     review: list[dict],
     universe: list[dict],
+    processed: Path | None = None,
 ) -> dict[str, Path]:
     output.mkdir(parents=True, exist_ok=True)
     safe_group = "_".join(re.findall(r"[A-Za-z0-9]+", industry_group))
-    stem = f"{safe_group}_Screening_{period}"
+    label = file_period_label(period)
+    stem = f"{safe_group}_Screening_{label}"
     workbook_path = output / f"{stem}.xlsx"
     csv_path = output / f"{stem}.csv"
-    summary_path = output / f"{safe_group}_Summary_{period}.md"
-    universe_path = output / f"{safe_group}_Universe_{period}.csv"
+    summary_path = output / f"{safe_group}_Summary_{label}.md"
+    universe_path = output / f"{safe_group}_Universe_{label}.csv"
     review_path = output / "manual_review.csv"
     warning_path = output / "extraction_warnings.jsonl"
 
@@ -119,7 +123,7 @@ def export_all(
     summary_path.write_text(
         _neutral_markdown_summary(period, industry_group, screening, review), encoding="utf-8"
     )
-    return {
+    outputs = {
         "xlsx": workbook_path,
         "csv": csv_path,
         "markdown": summary_path,
@@ -127,6 +131,18 @@ def export_all(
         "review": review_path,
         "warnings": warning_path,
     }
+    if processed is not None:
+        # Machine-readable copies of the audit tables for use outside Excel.
+        processed.mkdir(parents=True, exist_ok=True)
+        for name, sheet in (
+            ("raw_facts", "02_Raw_Data"),
+            ("ratios", "03_Ratios"),
+            ("history", "04_History"),
+        ):
+            path = processed / f"{safe_group}_{label}_{name}.csv"
+            frames[sheet].to_csv(path, index=False)
+            outputs[f"processed_{name}"] = path
+    return outputs
 
 
 def _format_workbook(workbook) -> None:
@@ -177,7 +193,9 @@ def _format_workbook(workbook) -> None:
             for row_number in range(2, ws.max_row + 1):
                 metric = str(ws.cell(row_number, headers["Metric"]).value or "")
                 value_cell = ws.cell(row_number, headers["Value"])
-                if metric.endswith(("ROE", "Dividend Yield")):
+                if not metric.startswith("Sector median"):
+                    value_cell.number_format = INTEGER_FORMAT
+                elif metric.endswith(("ROE", "Dividend Yield")):
                     value_cell.number_format = "0.00%;[Red]-0.00%"
                 elif metric.endswith(("P/E", "P/B")):
                     value_cell.number_format = RATIO_FORMAT
@@ -233,88 +251,102 @@ def _format_value_by_unit(ws, headers: dict, value_name: str, unit_name: str) ->
             cell.number_format = FINANCIAL_FORMAT
 
 
+MEDIAN_METRICS = ("P/E", "P/B", "ROE", "Dividend Yield")
+MEDIAN_NOTE = (
+    "Medians use companies with a defined value. P/E and P/B are left empty for negative "
+    "earnings or equity, so those companies are not in their medians."
+)
+
+
+def _median(frame: pd.DataFrame, metric: str) -> tuple[float | None, int]:
+    if metric not in frame:
+        return None, 0
+    series = pd.to_numeric(frame[metric], errors="coerce").dropna()
+    return (float(series.median()), len(series)) if not series.empty else (None, 0)
+
+
+def _basis_counts(rows: list[dict]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        basis = str(row.get("Income Period Basis") or "not available")
+        kind = "TTM" if basis.startswith("TTM") else ("FY" if basis.startswith("FY") else "other")
+        counts[kind] = counts.get(kind, 0) + 1
+    return counts
+
+
 def _summary_frame(rows: list[dict]) -> pd.DataFrame:
-    metrics = ["P/E", "P/B", "ROE", "Dividend Yield"]
-    data = []
     frame = pd.DataFrame(rows)
-    for metric in metrics:
-        series = (
-            pd.to_numeric(frame[metric], errors="coerce")
-            if metric in frame
-            else pd.Series(dtype=float)
-        )
-        data.append(
-            {
-                "Metric": f"Sector median {metric}",
-                "Value": series.median() if not series.empty else None,
-            }
-        )
-    data.insert(
-        0,
+    confidence = [row.get("Data Confidence") for row in rows]
+    basis = _basis_counts(rows)
+    data = [
+        {"Metric": "Companies processed", "Value": len(rows), "Observations": None},
         {
             "Metric": "Companies with high data confidence",
-            "Value": sum(row.get("Data Confidence") == "high" for row in rows),
+            "Value": confidence.count("high"),
+            "Observations": None,
         },
-    )
-    data.insert(0, {"Metric": "Companies processed", "Value": len(rows)})
+        {
+            "Metric": "Companies requiring review",
+            "Value": confidence.count("review"),
+            "Observations": None,
+        },
+        {
+            "Metric": "Companies with low data confidence",
+            "Value": confidence.count("low"),
+            "Observations": None,
+        },
+        {
+            "Metric": "Companies on a TTM income basis",
+            "Value": basis.get("TTM", 0),
+            "Observations": None,
+        },
+        {
+            "Metric": "Companies on a latest-financial-year income basis",
+            "Value": basis.get("FY", 0),
+            "Observations": None,
+        },
+    ]
+    for metric in MEDIAN_METRICS:
+        value, count = _median(frame, metric)
+        data.append({"Metric": f"Sector median {metric}", "Value": value, "Observations": count})
+    data.append({"Metric": MEDIAN_NOTE, "Value": None, "Observations": None})
     return pd.DataFrame(data)
-
-
-def _markdown_summary(period: str, rows: list[dict], review: list[dict]) -> str:
-    frame = pd.DataFrame(rows)
-    lines = [
-        f"# Capital Goods screening summary — {period}",
-        "",
-        f"Companies processed: **{len(rows)}**.",
-        "",
-    ]
-    for metric in ("P/E", "P/B", "ROE", "Dividend Yield"):
-        series = (
-            pd.to_numeric(frame[metric], errors="coerce").dropna()
-            if metric in frame
-            else pd.Series(dtype=float)
-        )
-        value = series.median() if not series.empty else None
-        rendered = "NA" if value is None else f"{value:.4f}"
-        lines.append(f"- Sector median {metric}: {rendered}")
-    missing = [row["Ticker"] for row in rows if row.get("Data Confidence") != "high"]
-    lines += [
-        "",
-        "## Missing data and warnings",
-        "",
-        f"Companies requiring review: {', '.join(missing) or 'None'}.",
-        f"Manual-review items: {len(review)}.",
-        "",
-        "This report contains no ranking, score, selection, or investment recommendation.",
-        "",
-    ]
-    return "\n".join(lines)
 
 
 def _neutral_markdown_summary(
     period: str, industry_group: str, rows: list[dict], review: list[dict]
 ) -> str:
     frame = pd.DataFrame(rows)
-    high_confidence = sum(row.get("Data Confidence") == "high" for row in rows)
+    confidence = [row.get("Data Confidence") for row in rows]
+    basis = _basis_counts(rows)
     lines = [
         f"# {industry_group} screening summary - {period}",
         "",
         f"Companies processed: **{len(rows)}**.",
-        f"Companies with high data confidence: **{high_confidence}**.",
-        f"Companies requiring review: **{len(rows) - high_confidence}**.",
+        f"Companies with high data confidence: **{confidence.count('high')}**.",
+        f"Companies requiring review: **{confidence.count('review')}**.",
+        f"Companies with low data confidence: **{confidence.count('low')}**.",
+        "",
+        (
+            "High confidence means every core metric of the latest annual report passed the "
+            "automated reconciliations. It is not a manual verification of the figures."
+        ),
+        "",
+        "## Period basis",
+        "",
+        f"- Income figures on a trailing-twelve-month basis: {basis.get('TTM', 0)} companies",
+        f"- Income figures for the latest financial year: {basis.get('FY', 0)} companies",
+        f"- Other or unavailable: {basis.get('other', 0)} companies",
         "",
         "## Sector medians",
         "",
     ]
-    for metric in ("P/E", "P/B", "ROE", "Dividend Yield"):
-        series = (
-            pd.to_numeric(frame[metric], errors="coerce").dropna()
-            if metric in frame
-            else pd.Series(dtype=float)
+    for metric in MEDIAN_METRICS:
+        value, count = _median(frame, metric)
+        lines.append(
+            f"- Sector median {metric}: {_render_metric(metric, value)} ({count} companies)"
         )
-        value = series.median() if not series.empty else None
-        rendered = _render_metric(metric, value)
-        lines.append(f"- Sector median {metric}: {rendered}")
+    lines += ["", MEDIAN_NOTE]
 
     observed_metrics = (
         "Revenue",
@@ -376,21 +408,31 @@ def _neutral_markdown_summary(
         or ["- No anomalies flagged"]
     )
 
-    warning_groups: dict[tuple[str, str], set[str]] = {}
+    warning_groups: dict[str, dict] = {}
     for item in review:
         rule = str(item.get("Validation Rule") or "unspecified")
+        group = warning_groups.setdefault(rule, {"count": 0, "tickers": set(), "reasons": []})
+        group["count"] += 1
+        group["tickers"].add(str(item.get("Ticker") or "unknown"))
         reason = str(item.get("Reason for Uncertainty") or "No reason supplied")
-        warning_groups.setdefault((rule, reason), set()).add(str(item.get("Ticker") or "unknown"))
+        if reason not in group["reasons"]:
+            group["reasons"].append(reason)
     lines += [
         "",
         "## Extraction warnings",
         "",
-        f"Manual-review items: {len(review)}.",
+        f"Manual-review items: {len(review)}. Every item is listed in `manual_review.csv`.",
     ]
-    for (rule, reason), tickers in sorted(warning_groups.items()):
+    for rule, group in sorted(warning_groups.items()):
+        tickers = sorted(group["tickers"])
         lines.append(
-            f"- `{rule}` ({len(tickers)} companies: {', '.join(sorted(tickers))}): {reason}"
+            f"- `{rule}`: {group['count']} items across {len(tickers)} companies "
+            f"({', '.join(tickers)})"
         )
+        for reason in group["reasons"][:3]:
+            lines.append(f"  - {reason}")
+        if len(group["reasons"]) > 3:
+            lines.append(f"  - ... and {len(group['reasons']) - 3} more distinct reasons")
     if not warning_groups:
         lines.append("- None")
     lines += [

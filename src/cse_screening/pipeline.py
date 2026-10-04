@@ -42,9 +42,7 @@ def run(
     correction_path: Path | None = None,
 ) -> dict[str, Path]:
     config = yaml.safe_load((root / "config" / "companies.yml").read_text(encoding="utf-8"))
-    pipeline_config = yaml.safe_load(
-        (root / "config" / "pipeline.example.yml").read_text(encoding="utf-8")
-    )
+    pipeline_config = load_pipeline_config(root / "config")
     configured = {item["ticker"]: item for item in config["companies"]}
     as_of = datetime.now(ZoneInfo("Asia/Colombo")).date()
     group, cse_companies = CSEUniverseClient().companies(industry_group)
@@ -484,7 +482,7 @@ def run(
     return export_all(
         period,
         group["industry_group"],
-        root / "reports",
+        root / str(pipeline_config.get("reports_directory", "reports")),
         screening,
         raw,
         ratios,
@@ -494,7 +492,30 @@ def run(
         _flag_records(screening, flag_context, thresholds),
         review,
         universe_audit,
+        processed=root / str(pipeline_config.get("processed_directory", "data/processed")),
     )
+
+
+def load_pipeline_config(config_directory: Path) -> dict:
+    """Settings from ``pipeline.yml`` laid over the shipped defaults.
+
+    ``pipeline.example.yml`` holds every default. A local ``pipeline.yml`` only
+    needs the keys it changes; nested sections such as ``flags`` are merged.
+    """
+    settings = yaml.safe_load(
+        (config_directory / "pipeline.example.yml").read_text(encoding="utf-8")
+    )
+    local = config_directory / "pipeline.yml"
+    if local.exists():
+        overrides = yaml.safe_load(local.read_text(encoding="utf-8")) or {}
+        if not isinstance(overrides, dict):
+            raise TypeError(f"{local}: expected a mapping of settings")
+        for key, value in overrides.items():
+            if isinstance(value, dict) and isinstance(settings.get(key), dict):
+                settings[key] = {**settings[key], **value}
+            else:
+                settings[key] = value
+    return settings
 
 
 def _decimal(value) -> Decimal | None:

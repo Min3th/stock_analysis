@@ -74,3 +74,14 @@ def ttm_from_quarters(quarters: list[tuple[date, Decimal, int]]) -> Decimal | No
         if month_gap != 3:
             return None
     return sum((value for _, value, _ in ordered), Decimal(0))
+
+
+def file_period_label(period: str) -> str:
+    """Period label used in output filenames: ``2026Q3`` becomes ``2026_Q3``."""
+    year, quarter = period_label(period)
+    return f"{year}_Q{quarter}" if quarter else str(year)
+
+
+def current_period(today: date) -> str:
+    """Calendar quarter containing ``today``, as the default run label."""
+    return f"{today.year}Q{(today.month - 1) // 3 + 1}"

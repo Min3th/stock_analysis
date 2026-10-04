@@ -2,7 +2,12 @@ from datetime import date
 from decimal import Decimal as D
 
 from cse_screening.calculations.screening import build_snapshot
-from cse_screening.pipeline import _data_confidence, _history_rows, _market_share_count
+from cse_screening.pipeline import (
+    _data_confidence,
+    _history_rows,
+    _market_share_count,
+    load_pipeline_config,
+)
 
 ANNUAL = {"kind": "annual_report", "period_end": "2026-03-31", "title": "AR", "url": "u"}
 ISSUER = {"ticker": "T.N0000", "name": "T PLC", "market_data": {"market_source_url": "cse"}}
@@ -69,3 +74,16 @@ def test_history_keeps_current_and_comparative_but_not_a_fifteen_month_year():
     ]
     assert _history_rows(ISSUER, document, dict(revenue, period_months=15), D("0.8")) == []
     assert _history_rows(ISSUER, document, dict(revenue, confidence=D("0.7")), D("0.8")) == []
+
+
+def test_local_pipeline_settings_are_laid_over_the_defaults(tmp_path):
+    (tmp_path / "pipeline.example.yml").write_text(
+        "confidence_threshold: 0.80\nflags:\n  high_debt_to_equity: 2.0\n  ocf_to_net_profit_low: 0.7\n"
+    )
+    assert load_pipeline_config(tmp_path)["flags"]["high_debt_to_equity"] == 2.0
+    (tmp_path / "pipeline.yml").write_text(
+        "confidence_threshold: 0.85\nflags:\n  high_debt_to_equity: 1.5\n"
+    )
+    settings = load_pipeline_config(tmp_path)
+    assert settings["confidence_threshold"] == 0.85
+    assert settings["flags"] == {"high_debt_to_equity": 1.5, "ocf_to_net_profit_low": 0.7}

@@ -1,11 +1,13 @@
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 from cse_screening.exporters.workbook import (
     FINANCIAL_FORMAT,
     PER_SHARE_FORMAT,
     RATIO_FORMAT,
+    SHEETS,
     _format_workbook,
     _neutral_markdown_summary,
+    export_all,
 )
 
 
@@ -81,3 +83,55 @@ def test_excel_financial_number_formats_are_metric_aware():
     _format_workbook(workbook)
     assert ratios["B2"].number_format == FINANCIAL_FORMAT
     assert ratios["B3"].number_format == RATIO_FORMAT
+
+
+def test_export_writes_specified_filenames_sheets_and_processed_tables(tmp_path):
+    screening = [
+        {
+            "Ticker": "AAA.N0000",
+            "Company": "AAA PLC",
+            "P/E": 10,
+            "P/B": 1,
+            "ROE": 0.1,
+            "Dividend Yield": 0.02,
+            "Data Confidence": "high",
+            "Income Period Basis": "TTM to 2026-06-30",
+            "Flags": "",
+        }
+    ]
+    raw = [{"Fact ID": "AAA:1", "Metric": "revenue", "Extracted Value": 5, "Unit": "LKR"}]
+    outputs = export_all(
+        "2026Q3",
+        "Capital Goods",
+        tmp_path / "reports",
+        screening,
+        raw,
+        [{"Ticker": "AAA.N0000", "Metric": "P/E", "Value": 10}],
+        [],
+        [],
+        [],
+        [],
+        [{"Ticker": "AAA.N0000", "Validation Rule": "missing_metric"}],
+        [{"Ticker": "AAA.N0000"}],
+        processed=tmp_path / "processed",
+    )
+    assert outputs["xlsx"].name == "Capital_Goods_Screening_2026_Q3.xlsx"
+    assert outputs["csv"].name == "Capital_Goods_Screening_2026_Q3.csv"
+    assert outputs["markdown"].name == "Capital_Goods_Summary_2026_Q3.md"
+    assert outputs["review"].name == "manual_review.csv"
+    assert outputs["processed_raw_facts"].exists()
+    workbook = load_workbook(outputs["xlsx"])
+    assert workbook.sheetnames == SHEETS
+    assert set(SHEETS) >= {
+        "01_Screening",
+        "02_Raw_Data",
+        "03_Ratios",
+        "04_History",
+        "05_Dividends",
+        "06_Sources",
+        "07_Flags",
+        "08_Summary",
+    }
+    summary = outputs["markdown"].read_text(encoding="utf-8")
+    assert "Sector median P/E: 10.00 (1 companies)" in summary
+    assert "trailing-twelve-month basis: 1 companies" in summary
