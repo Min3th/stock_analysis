@@ -174,6 +174,13 @@ DEBT_ROW = re.compile(
     r"bank overdrafts?|due to banks|debentures?)\b",
     re.IGNORECASE,
 )
+LEASE_ROW = re.compile(
+    r"^(?:(?:current|non[- ]current) portion of |current |non[- ]current )*"
+    r"(?:lease liabilit(?:y|ies)|obligations? under (?:finance |operating )?leases?|"
+    r"lease obligations?|finance lease (?:liabilit(?:y|ies)|obligations?))\b",
+    re.IGNORECASE,
+)
+LEASE_EXCLUSION = re.compile(r"receivable|related part|right[- ]of[- ]use", re.IGNORECASE)
 DEBT_EXCLUSION = re.compile(r"receivable|related part|advances|lease", re.IGNORECASE)
 YEAR_TO_DATE = 0  # "period ended <date>": cumulative from the start of the financial year
 PERIOD_PHRASES = (
@@ -432,6 +439,9 @@ def extract_primary_metrics(
     debt = _total_debt(statements.get("position", []))
     if debt is not None:
         results["total_debt"] = debt
+    leases = _lease_liabilities(statements.get("position", []))
+    if leases is not None:
+        results["lease_liabilities"] = leases
     return list(results.values())
 
 
@@ -604,6 +614,49 @@ def _derive_balance_sheet_identities(results: dict[str, dict], pages: list[State
             ),
         }
         _derive_balance_sheet_identities(results, pages)
+
+
+def _lease_liabilities(pages: list[StatementPage]) -> dict | None:
+    """Current plus non-current lease liabilities, kept apart from total debt."""
+    components = []
+    for page in pages:
+        for label_text, source in page.rows:
+            if not LEASE_ROW.search(label_text) or LEASE_EXCLUSION.search(label_text):
+                continue
+            _row, current, previous, _scope, basis = page.read(source)
+            if current is None and previous is None:
+                continue
+            components.append((page, source, current or Decimal(0), previous or Decimal(0), basis))
+    if not components:
+        return None
+    page = components[0][0]
+    multiplier = page.unit[1] if page.unit else Decimal(1)
+    current = sum(item[2] for item in components) * multiplier
+    previous = sum(item[3] for item in components) * multiplier
+    bases = {item[4] for item in components}
+    if "ambiguous" in bases:
+        basis = "ambiguous"
+    else:
+        basis = "confirmed" if bases == {"confirmed"} else "assumed"
+    return {
+        "metric": "lease_liabilities",
+        "value": current,
+        "original_value": current,
+        "unit": "LKR",
+        "original_unit": page.unit[0] if page.unit else "unknown",
+        "multiplier": Decimal(1),
+        "page": page.number,
+        "source_text": " | ".join(item[1] for item in components),
+        "confidence": min(_confidence(page, basis, False), Decimal("0.88")),
+        "comparatives": [current, previous],
+        "previous_value": previous,
+        "statement_scope": "group" if "group" in page.layout.scopes else "primary",
+        "extraction_method": "lease_component_aggregation",
+        "notes": (
+            "Sum of current and non-current lease liability rows on the statement of "
+            "financial position. Kept separate from total debt."
+        ),
+    }
 
 
 def _total_debt(pages: list[StatementPage]) -> dict | None:

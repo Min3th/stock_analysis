@@ -5,6 +5,9 @@ universe:
   include: []
   overrides: {}
 
+# Optional per company: ir_url, an investor-relations page. PDF links on the same
+# host that name a report and period are used only when the CSE archive and the
+# fallback documents below do not cover that period (labelled issuer_ir).
 companies:
   - ticker: AEL.N0000
     name: ACCESS ENGINEERING PLC

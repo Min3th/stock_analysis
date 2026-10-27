@@ -292,6 +292,11 @@ def extract_document_metrics(
     if shares is not None:
         shares.setdefault("extraction_method", "ordinary_share_count")
         by_metric[shares["metric"]] = shares
+    classes = extract_share_classes(pages)
+    for fact in classes:
+        # A stated-capital note with both classes names the whole share base, so it
+        # replaces a single-class count picked up elsewhere.
+        by_metric[fact["metric"]] = fact
     return list(by_metric.values())
 
 
@@ -573,3 +578,94 @@ def extract_ordinary_shares(pages: list[str]) -> dict | None:
                     "notes": note,
                 }
     return None
+
+
+VOTING_ROW = re.compile(r"^(?:ordinary\s+)?voting\s+shares?\b", re.IGNORECASE)
+NON_VOTING_ROW = re.compile(r"^(?:ordinary\s+)?non[\s-]*voting\s+shares?\b", re.IGNORECASE)
+CLASS_TOTAL_ROW = re.compile(
+    r"^(?:balance at the end of the (?:year|period)|total(?: number of)?(?: ordinary)? shares)",
+    re.IGNORECASE,
+)
+
+
+def _share_counts(line: str) -> list[Decimal]:
+    values = [parse_number(item) for item in NUMBER.findall(line)]
+    return [item for item in values if item is not None and abs(item) >= 100_000]
+
+
+def extract_share_classes(pages: list[str]) -> list[dict]:
+    """Voting and non-voting share counts from a stated-capital note.
+
+    Returns facts for each class and for their total. The total is the whole
+    ordinary share base, which per-share values and the EPS reconciliation need;
+    each class count is what one listed ticker represents. The total is checked
+    against the note's own "balance at the end of the year" row when it has one.
+    """
+    for page_number, text in enumerate(pages, 1):
+        lowered = text.casefold()
+        if "stated capital" not in lowered and "fully paid" not in lowered:
+            continue
+        lines = [" ".join(line.split()) for line in normalize_text(text).splitlines()]
+        voting = non_voting = total_row = None
+        for index, line in enumerate(lines):
+            # Labels may wrap, so the numbers can sit on the line that follows.
+            window = line if _share_counts(line) else " ".join(lines[index : index + 2])
+            counts = _share_counts(window)
+            if voting is None and VOTING_ROW.search(line) and len(counts) >= 2:
+                voting = (line, counts[0], counts[1])
+            elif non_voting is None and NON_VOTING_ROW.search(line) and len(counts) >= 2:
+                non_voting = (line, counts[0], counts[1])
+            elif (
+                voting
+                and non_voting
+                and total_row is None
+                and CLASS_TOTAL_ROW.search(line)
+                and len(counts) >= 2
+            ):
+                total_row = (line, counts[0], counts[1])
+        if voting is None or non_voting is None:
+            continue
+        total = voting[1] + non_voting[1]
+        previous_total = voting[2] + non_voting[2]
+        reconciled = (
+            total_row is not None and total_row[1] == total and total_row[2] == previous_total
+        )
+        confidence = Decimal("0.90") if reconciled else Decimal("0.78")
+        source = " | ".join(item[0] for item in (voting, non_voting, total_row) if item)
+        facts = []
+        for metric, value, previous, label in (
+            ("ordinary_shares_voting", voting[1], voting[2], "Voting shares issued"),
+            (
+                "ordinary_shares_non_voting",
+                non_voting[1],
+                non_voting[2],
+                "Non-voting shares issued",
+            ),
+            ("ordinary_shares_outstanding", total, previous_total, "Voting plus non-voting shares"),
+        ):
+            facts.append(
+                {
+                    "metric": metric,
+                    "value": value,
+                    "original_value": value,
+                    "unit": "shares",
+                    "original_unit": "shares",
+                    "multiplier": Decimal(1),
+                    "page": page_number,
+                    "source_text": source,
+                    "confidence": confidence,
+                    "comparatives": [value, previous],
+                    "previous_value": previous,
+                    "extraction_method": "stated_capital_share_classes",
+                    "notes": (
+                        f"{label} from the stated-capital note"
+                        + (
+                            "; the sum agrees with the note's balance row."
+                            if reconciled
+                            else "; no balance row confirmed the sum, so confidence is reduced."
+                        )
+                    ),
+                }
+            )
+        return facts
+    return []

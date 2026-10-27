@@ -105,6 +105,17 @@ empty, `03_Ratios` marks them `not_applicable` with the reason, and
 `Not Applicable Metrics` lists them, so they are not reported as missing.
 A unit header such as "(Amounts in LKR Thousands)" is recognised.
 
+## Share classes, leases and issuer IR
+
+`extract_share_classes` reads the voting and non-voting counts from a stated-
+capital note and checks their sum against the note's balance row; the total
+replaces a single-class count, and each class is kept as its own fact. Lease
+liabilities are summed from the lease rows of the position statement into
+`lease_liabilities` and never folded into `total_debt`. `downloaders/ir.py`
+scrapes one configured IR page for same-host PDF links; its documents carry
+`source_type: issuer_ir` and the lowest source tier in `_merge_documents`
+(CSE and configured documents, then uploads, then IR).
+
 ## Financial-year dividends
 
 `calculations/dividends.py` maps each cash-dividend announcement to the financial

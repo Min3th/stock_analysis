@@ -411,14 +411,25 @@ they are never used as company-specific facts.
   the announced total is used (`DPS Basis = announced_fy`); the CSE feed only
   exposes recent announcements, so older years are often absent.
 - Operating profit is taken only from the income statement. Issuers that do not
-  print such a row have no operating profit or EBIT proxy.
+  print such a row have no operating profit or EBIT proxy; each gets a
+  manual-review item saying so, and nothing is derived from other lines.
 - Total debt sums borrowings, term and import loans, debentures and bank
-  overdrafts on the statement of financial position. Lease liabilities and
-  related-party balances are excluded. A statement with no such rows gives no
-  debt figure, which is not the same as zero debt.
-- The CSE-implied share count is a current figure for one listed class.
-  Dual-class issuers (for example RHL.N0000 and RHL.X0000) therefore get book
-  value per share only from a reported share count.
+  overdrafts on the statement of financial position. Related-party balances are
+  excluded. A statement with no such rows gives no debt figure, which is not the
+  same as zero debt. Lease liabilities (current plus non-current) are a separate
+  fact and the `Lease Liabilities` column; `Debt-to-Equity incl. Leases` adds
+  them to total debt and is empty when no lease row was accepted.
+- The CSE-implied share count is a current figure for one listed class, so it
+  is not used for dual-class issuers. Their voting and non-voting counts are read
+  from the stated-capital note; `Ordinary Shares Outstanding` is the total (it
+  reconciles with EPS and attributable profit) and `Listed Class Shares` is the
+  class a ticker represents (RHL.N0000 and RHL.X0000). A note without both
+  classes falls back to the older behaviour.
+- Issuer IR discovery is optional: set `ir_url` on a company in
+  `config/companies.yml` and PDF links on that host (or subdomains) whose text or
+  file name names a report and a period are added as `issuer_ir` documents. They
+  rank below CSE filings, configured fallbacks and uploads, and are cached under
+  `data/raw/issuer_ir/` for `--offline` runs.
 - Native text, PyMuPDF table recognition, and page-level Tesseract OCR are wired
   into a layered parser. OCR depends on the optional Python packages and a
   system Tesseract installation; unavailable engines produce review warnings.

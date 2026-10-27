@@ -54,6 +54,7 @@ NOT_APPLICABLE = {
     "movements, and capital expenditure is not a separate reported driver",
 }
 NOT_APPLICABLE_FACTS = ("capital_expenditure", "total_debt")
+NOT_APPLICABLE["Debt-to-Equity incl. Leases"] = NOT_APPLICABLE["Debt-to-Equity"]
 
 SCREEN_COLUMNS = [
     # Columns required by the screening specification, in its order.
@@ -101,6 +102,9 @@ SCREEN_COLUMNS = [
     "Liquidity Period",
     "Not Applicable Metrics",
     "DPS Basis",
+    "Lease Liabilities",
+    "Debt-to-Equity incl. Leases",
+    "Listed Class Shares",
 ]
 
 
@@ -642,6 +646,34 @@ def screening_metrics(
             f"As at {balance_date}" if balance_date else None,
             annual.get("total_debt"),
             annual.get("cash"),
+        )
+    )
+    leases = snapshot.annual_value("lease_liabilities")
+    values["Lease Liabilities"] = leases
+    with_leases = (
+        debt_to_equity(debt + leases, _positive(equity))
+        if debt is not None and leases is not None
+        else None
+    )
+    values["Debt-to-Equity incl. Leases"] = with_leases
+    rows.append(
+        _ratio(
+            ticker,
+            "Debt-to-Equity incl. Leases",
+            with_leases,
+            "(Total debt + lease liabilities) / ordinary shareholders' equity",
+            debt + leases if debt is not None and leases is not None else None,
+            equity,
+            f"As at {balance_date}" if balance_date else None,
+            annual.get("total_debt"),
+            annual.get("lease_liabilities"),
+            annual.get(equity_metric),
+            notes=_join_notes(
+                None
+                if leases is not None
+                else "No lease-liability row was accepted, so lease debt is not assumed to be nil.",
+                _not_meaningful(equity),
+            ),
         )
     )
     values["Retained Earnings"] = snapshot.annual_value("retained_earnings")

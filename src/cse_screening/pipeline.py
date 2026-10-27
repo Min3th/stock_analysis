@@ -26,6 +26,7 @@ from .corrections import correction_candidates, load_corrections
 from .downloaders.announcements import CSEDividendClient, dividend_type
 from .downloaders.financials import CSEFinancialDocumentClient
 from .downloaders.http import CachedDownloader, get_market_data
+from .downloaders.ir import discover_ir_documents
 from .downloaders.liquidity import LiquidityStore
 from .downloaders.local import upload_documents
 from .downloaders.universe import CSEUniverseClient, apply_universe_config
@@ -94,6 +95,23 @@ def run(
             )
     except (httpx.HTTPError, OSError, TypeError, ValueError) as exc:
         financial_discovery_error = f"CSE financial filing discovery: {exc}"
+    ir_errors: dict[str, str] = {}
+    for issuer in companies:
+        ir_url = configured.get(issuer["ticker"], {}).get("ir_url")
+        if not ir_url:
+            continue
+        try:
+            ir_documents = discover_ir_documents(
+                ir_url,
+                issuer["ticker"],
+                cache_root,
+                offline=offline,
+                timeout=timeout,
+                user_agent=user_agent,
+            )
+            issuer["documents"] = _merge_documents(issuer.get("documents", []), ir_documents)
+        except (httpx.HTTPError, OSError, ValueError) as exc:
+            ir_errors[issuer["ticker"]] = f"issuer IR discovery ({ir_url}): {exc}"
     uploads = upload_documents(root / "config" / "uploads.yml", root)
     for issuer in companies:
         if issuer["ticker"] in uploads:
@@ -139,6 +157,8 @@ def run(
             document_errors.append(financial_discovery_error)
         if dividend_error:
             document_errors.append(dividend_error)
+        if issuer["ticker"] in ir_errors:
+            document_errors.append(ir_errors[issuer["ticker"]])
         market = issuer.get("market_data")
         try:
             if market is None:
@@ -491,6 +511,11 @@ def run(
                 ),
             }
         )
+        class_metric = {"N": "ordinary_shares_voting", "X": "ordinary_shares_non_voting"}.get(
+            issuer["ticker"].split(".", 1)[1][:1]
+        )
+        if multi_class and class_metric:
+            row["Listed Class Shares"] = snapshot.annual_value(class_metric)
         screening.append(row)
         required_metrics = [*METRIC_ALIASES, "total_debt", "ordinary_shares_outstanding"]
         missing = [
@@ -502,7 +527,20 @@ def run(
             document_errors.append(
                 "No official financial document URLs are configured yet; market data only"
             )
+        income_located = any(
+            fact.get("extraction_method", "").startswith("primary_income_row")
+            for document, facts in document_facts
+            if document["kind"] == "annual_report"
+            and str(document["period_end"]) == str(snapshot.annual_end)
+            for fact in facts
+        )
         for metric in missing:
+            reason = "No candidate for this metric was found in the latest annual report"
+            if metric == "operating_profit" and income_located:
+                reason = (
+                    "The income statement has no operating-profit row. Operating profit and "
+                    "the EBIT proxy are left empty rather than derived from other lines"
+                )
             review.append(
                 {
                     "Company": issuer["name"],
@@ -515,9 +553,7 @@ def run(
                     "Source Text": "",
                     "Extraction Strategy": "",
                     "Validation Rule": "missing_metric",
-                    "Reason for Uncertainty": (
-                        "No candidate for this metric was found in the latest annual report"
-                    ),
+                    "Reason for Uncertainty": reason,
                 }
             )
         for error in document_errors:
@@ -921,6 +957,10 @@ def _deduplicate_history(rows: list[dict]) -> list[dict]:
     )
 
 
+# Official CSE and configured documents beat uploads, which beat issuer IR pages.
+_SOURCE_TIER = {"issuer_ir": 0, "user_upload": 1}
+
+
 def _merge_documents(discovered: list[dict], configured: list[dict]) -> list[dict]:
     """Retain three annual periods and the latest interim, preferring official discovery."""
     unique = {}
@@ -935,12 +975,12 @@ def _merge_documents(discovered: list[dict], configured: list[dict]) -> list[dic
             key = str(item.get("period_end") or "")
             prior = by_period.get(key)
             rank = (
-                item.get("source_type") != "user_upload",
+                _SOURCE_TIER.get(item.get("source_type"), 2),
                 str(item.get("publication_date") or ""),
                 bool(item.get("discovery_url")),
             )
             if prior is None or rank > (
-                prior.get("source_type") != "user_upload",
+                _SOURCE_TIER.get(prior.get("source_type"), 2),
                 str(prior.get("publication_date") or ""),
                 bool(prior.get("discovery_url")),
             ):
