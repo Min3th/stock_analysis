@@ -257,3 +257,20 @@ def test_changed_year_end_is_reported_as_a_fifteen_month_period():
     )
     assert reporting_period_months(header) == 15
     assert reporting_period_months(INCOME) is None
+
+
+def test_repeated_unit_marker_row_is_header_not_amounts():
+    from decimal import Decimal
+
+    from cse_screening.extractors.layout import header_lines, page_unit
+
+    text = (
+        "Hatton National Bank PLC\n"
+        "INCOME STATEMENT\n"
+        "                          Bank        Group\n"
+        "For the year ended 31st December   2025  2024  2025  2024\n"
+        "                Note     Rs 000  Rs 000  Rs 000  Rs 000\n"
+        "Gross income      7   243,601,451  190,538,072  300,747,904  228,476,799\n"
+    )
+    assert any("Rs 000" in line for line in header_lines(text))
+    assert page_unit(text) == ("LKR '000", Decimal(1000))

@@ -391,9 +391,11 @@ they are never used as company-specific facts.
 - Statement layouts outside that sample can defeat the locator or the layout
   reader. The value is then withheld or marked `assumed`, not guessed, and
   appears in the sector's manual-review CSV. Banks, Diversified Financials and
-  insurers have their own statement rows (see "Financial issuers" in docs/architecture.md); 9 of 15
-  Banks tickers produced revenue and profit in the last offline run, and the
-  rest are withheld for review. Insurers have row labels but no cached filing
+  insurers have their own statement rows (see "Financial issuers" in docs/architecture.md); 11 of 15
+  Banks tickers produced revenue and profit in the last offline run (see
+  "Measured coverage"), and the rest are withheld for review (ABL and COMB
+  statement pages are not located reliably, and NDB's ten-column income statement
+  is rejected as a multi-year table). Insurers have row labels but no cached filing
   has been checked against them.
 - TTM is exercised on real first-quarter and half-year filings: quarter-plus-
   cumulative blocks ("Six Months ended | Quarter ended", PABC, SEYB) and
@@ -457,6 +459,23 @@ they are never used as company-specific facts.
    reliability gate (complete for the Capital Goods sample; see the first
    limitation above).
 6. Next: manual spot-checks recorded as fixtures and an end-to-end test.
+
+## Measured coverage
+
+`python scripts/coverage_report.py` runs each supported industry group from the
+offline cache and prints the share of issuers with a value, the share whose
+identities all held (assets = liabilities + equity, EPS x shares ~ profit, signs,
+scale) and the share with `high` confidence. Groups whose universe is not cached
+are listed as such; `--live` fetches them. Last measured on 2026Q3 (offline):
+
+| Group | Issuers | Revenue | Net profit | EPS | ROE | P/E | P/B | DPS | Reconciled | High conf. | TTM |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Capital Goods | 27 | 100% | 100% | 100% | 93% | 81% | 96% | 52% | 85% | 93% | 48% |
+| Banks | 15 | 73% | 73% | 73% | 67% | 73% | 80% | 67% | 60% | 60% | 33% |
+| Technology Hardware & Equipment | 0 | the CSE returns no constituents | | | | | | | | | |
+
+The other 19 groups have not been run: no filing for them is in the cache, and
+fetching them downloads every annual report and interim statement.
 
 ## Neutrality policy
 

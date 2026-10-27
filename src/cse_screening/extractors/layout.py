@@ -345,7 +345,10 @@ def header_lines(text: str) -> list[str]:
         cells = trailing_values(line).tokens
         amounts = [cell for cell in cells if not re.fullmatch(r"20\d{2}", cell)]
         has_label = bool(re.search(r"[A-Za-z]{3}", line))
-        if len(amounts) >= 2 and has_label and not HEADER_YEAR.search(line):
+        # "Note  Rs 000  Rs 000" repeats a unit marker above each column; it is
+        # header text, not a row of amounts.
+        unit_markers = bool(amounts) and all(re.fullmatch(r"['‘’]?000s?", cell) for cell in amounts)
+        if len(amounts) >= 2 and has_label and not HEADER_YEAR.search(line) and not unit_markers:
             break
         output.append(line)
     return output
