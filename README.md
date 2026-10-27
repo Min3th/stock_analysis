@@ -395,10 +395,13 @@ they are never used as company-specific facts.
   Banks tickers produced revenue and profit in the last offline run, and the
   rest are withheld for review. Insurers have row labels but no cached filing
   has been checked against them.
-- TTM has only been exercised on first-quarter interim statements. Half-year
-  and nine-month layouts (quarter and cumulative blocks) are handled by rule
-  and unit tests, not yet by real filings; where the year-to-date block cannot
-  be proven the latest financial year is used and labelled.
+- TTM is exercised on real first-quarter and half-year filings: quarter-plus-
+  cumulative blocks ("Six Months ended | Quarter ended", PABC, SEYB) and
+  cumulative-first blocks ("Period ended | Quarter ended", SDB) are read from the
+  year-to-date column (fixtures in `tests/fixtures/interims/`). A nine-month
+  statement whose header does not name its length (NDB) keeps the latest
+  financial year, labelled, rather than guessing. Restatement notes that repeat a
+  prior-period statement are no longer mistaken for the income statement.
 - Per-share TTM adds and subtracts reported EPS, which assumes an unchanged
   share count over the period.
 - DPS comes from the annual report (income statement or highlights). Many

@@ -72,6 +72,10 @@ STATEMENT_TITLES: dict[str, tuple[str, ...]] = {
     "cash_flow": ("statement of cash flows", "cash flow statement", "statement of cash flow"),
 }
 MINIMUM_SCORE = {"income": 5, "position": 5, "cash_flow": 4}
+RESTATEMENT_NOTE = re.compile(
+    r"(?:cumulative impact of adjustments|as previously\s+reported|restated balance)",
+    re.IGNORECASE,
+)
 FOREIGN_CURRENCY = re.compile(
     r"(?:US\s?\$|\bUSD\b|\bUS dollars?\b|convenience translation)", re.IGNORECASE
 )
@@ -228,6 +232,10 @@ def statement_scores(text: str) -> dict[str, int]:
         if counts and sorted(counts)[len(counts) // 2] > 6:
             score -= 6
         if FOREIGN_CURRENCY.search(" ".join(lines[:15])):
+            score -= 6
+        # A restatement note repeats a statement for a prior period with
+        # "as previously reported / adjustments / restated" columns.
+        if RESTATEMENT_NOTE.search(" ".join(lines[:15])):
             score -= 6
         scores[kind] = score
     return scores
