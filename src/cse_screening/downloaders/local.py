@@ -49,6 +49,7 @@ def register_upload(
     title: str | None = None,
     period_months: int | None = None,
     publication_date: date | None = None,
+    original_filename: str | None = None,
     allowed_tickers: set[str] | None = None,
 ) -> dict:
     """Copy a PDF into the cache and append its provenance record; return it.
@@ -84,7 +85,7 @@ def register_upload(
         "publication_date": publication_date,
         "sha256": checksum,
         "path": stored.relative_to(root).as_posix(),
-        "original_filename": source.name,
+        "original_filename": Path(original_filename).name if original_filename else source.name,
         "uploaded_utc": datetime.now(UTC).isoformat(),
         "source_type": "user_upload",
     }

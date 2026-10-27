@@ -74,3 +74,8 @@ export function cachedCompanies(repoRoot: string, name: string): UniverseCompany
     industryGroup: item.industry_group ?? name,
   }));
 }
+
+/** Every ticker in any cached universe, for choosing the company an upload belongs to. */
+export function allCachedCompanies(repoRoot: string): UniverseCompany[] {
+  return GROUP_NAMES.flatMap((name) => cachedCompanies(repoRoot, name) ?? []);
+}

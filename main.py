@@ -69,6 +69,7 @@ def _parser() -> argparse.ArgumentParser:
     upload.add_argument("--period-end", required=True, help="YYYY-MM-DD")
     upload.add_argument("--period-months", type=int)
     upload.add_argument("--title")
+    upload.add_argument("--original-name", help="File name as the user supplied it")
 
     corrections = commands.add_parser("corrections", help="Manage manual corrections")
     actions = corrections.add_subparsers(dest="action", required=True)
@@ -153,6 +154,7 @@ def _uploads_command(parser: argparse.ArgumentParser, args: argparse.Namespace) 
             period_end=period_end,
             title=args.title,
             period_months=args.period_months,
+            original_filename=args.original_name,
             allowed_tickers=known_tickers(ROOT, cache_directory),
         )
     except (OSError, ValueError) as exc:

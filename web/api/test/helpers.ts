@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createApp } from "../src/app.js";
+import { createApp, type Deps } from "../src/app.js";
 import { loadConfig, type Config } from "../src/config.js";
 import { openDb, type Db } from "../src/db.js";
 import { JobQueue, type CommandBuilder } from "../src/jobs.js";
@@ -35,7 +35,11 @@ fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({
 }));
 `;
 
-export function harness(build?: CommandBuilder, env: NodeJS.ProcessEnv = {}): Harness {
+export function harness(
+  build?: CommandBuilder,
+  env: NodeJS.ProcessEnv = {},
+  deps: Deps = {},
+): Harness {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cse-web-"));
   fs.mkdirSync(path.join(root, "repo"), { recursive: true });
   fs.writeFileSync(path.join(root, "repo", "main.py"), "# stub\n");
@@ -46,7 +50,7 @@ export function harness(build?: CommandBuilder, env: NodeJS.ProcessEnv = {}): Ha
   });
   const db = openDb(":memory:");
   const queue = new JobQueue(config, db, build);
-  return { config, db, queue, app: createApp(config, db, queue), root };
+  return { config, db, queue, app: createApp(config, db, queue, deps), root };
 }
 
 /** Inserts a finished run whose run directory holds the given JSON tables. */

@@ -2,13 +2,24 @@ import express from "express";
 import type { Config } from "./config.js";
 import type { Db } from "./db.js";
 import type { JobQueue } from "./jobs.js";
+import { pythonRunner, type PythonRunner } from "./python.js";
 import { documentsRouter } from "./routes/documents.js";
 import { healthRouter } from "./routes/health.js";
 import { runsRouter } from "./routes/runs.js";
 import { tablesRouter } from "./routes/tables.js";
 import { universeRouter } from "./routes/universe.js";
+import { uploadsRouter } from "./routes/uploads.js";
 
-export function createApp(config: Config, db: Db, queue: JobQueue): express.Express {
+export interface Deps {
+  python?: PythonRunner;
+}
+
+export function createApp(
+  config: Config,
+  db: Db,
+  queue: JobQueue,
+  deps: Deps = {},
+): express.Express {
   const app = express();
   app.disable("x-powered-by");
 
@@ -34,11 +45,16 @@ export function createApp(config: Config, db: Db, queue: JobQueue): express.Expr
   app.use("/api", runsRouter(queue));
   app.use("/api", tablesRouter(queue));
   app.use("/api", documentsRouter(config, queue));
+  app.use("/api", uploadsRouter(config, db, deps.python ?? pythonRunner(config)));
 
   app.use("/api", (_req, res) => {
     res.status(404).json({ error: "not_found" });
   });
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    if ((err as { code?: string }).code === "LIMIT_FILE_SIZE") {
+      res.status(413).json({ error: "upload_failed", message: "The file is larger than the upload limit." });
+      return;
+    }
     if (err instanceof SyntaxError) {
       res.status(400).json({ error: "invalid_json" });
       return;

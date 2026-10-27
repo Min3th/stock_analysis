@@ -40,6 +40,9 @@ def test_upload_is_stored_by_checksum_with_provenance(tmp_path):
     assert record["sha256"] == checksum
     assert record["path"] == f"data/raw/AAA_N0000/uploads/{checksum[:16]}.pdf"
     assert record["original_filename"] == "Report (final).pdf"
+    renamed = _register(tmp_path, title="Renamed", original_filename="../../Client copy.pdf")
+    # Same file content, so the first record is returned; the name is only stored once.
+    assert renamed == record
     assert record["source_type"] == "user_upload"
     stored = tmp_path / record["path"]
     assert stored.read_bytes() == b"%PDF-1.4 minimal"

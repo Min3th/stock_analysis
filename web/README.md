@@ -33,6 +33,14 @@ with the Python package by a test), the ticker and period against strict pattern
 log is replayed first, so a late viewer sees everything). When the server restarts, any
 run that was still queued or running is marked failed.
 
+## Uploads
+
+`POST /api/uploads` (multipart: `file`, `ticker`, `kind`, `periodEnd`, `periodMonths` for interims)
+checks size and the `%PDF` header, stores the file under `web/data/uploads/pending/` by checksum
+and runs `main.py extract` for the preview (nothing is stored in the pipeline yet). `POST
+/api/uploads/:id/accept` calls `main.py uploads add`, which re-checks the universe and is the
+only writer of `config/uploads.yml`; `DELETE /api/uploads/:id` discards it.
+
 ## Notes
 
 - Node 20 or later. `better-sqlite3` is a native module; the install downloads a
