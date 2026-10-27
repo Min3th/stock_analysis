@@ -14,8 +14,11 @@ data/processed/**
 reports/**
 !reports/.gitkeep
 manual_review.csv
+*_Manual_Review_*.csv
 
 # Local-only domain references
 Stock-Selection-Desision-Making-English.pdf
 Understanding-Financial-Statements-English.pdf
 
+data/runs/**
+!data/runs/.gitkeep

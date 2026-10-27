@@ -1,3 +1,6 @@
+import json
+from decimal import Decimal
+
 from openpyxl import Workbook, load_workbook
 
 from cse_screening.exporters.workbook import (
@@ -118,7 +121,7 @@ def test_export_writes_specified_filenames_sheets_and_processed_tables(tmp_path)
     assert outputs["xlsx"].name == "Capital_Goods_Screening_2026_Q3.xlsx"
     assert outputs["csv"].name == "Capital_Goods_Screening_2026_Q3.csv"
     assert outputs["markdown"].name == "Capital_Goods_Summary_2026_Q3.md"
-    assert outputs["review"].name == "manual_review.csv"
+    assert outputs["review"].name == "Capital_Goods_Manual_Review_2026_Q3.csv"
     assert outputs["processed_raw_facts"].exists()
     workbook = load_workbook(outputs["xlsx"])
     assert workbook.sheetnames == SHEETS
@@ -135,3 +138,51 @@ def test_export_writes_specified_filenames_sheets_and_processed_tables(tmp_path)
     summary = outputs["markdown"].read_text(encoding="utf-8")
     assert "Sector median P/E: 10.00 (1 companies)" in summary
     assert "trailing-twelve-month basis: 1 companies" in summary
+
+
+def test_empty_run_writes_manifest_and_no_empty_csv(tmp_path):
+    outputs = export_all(
+        "2026Q3",
+        "Technology Hardware & Equipment",
+        tmp_path / "reports",
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        run_dir=tmp_path / "runs" / "r1",
+        manifest={"run_id": "r1"},
+    )
+    assert "csv" not in outputs
+    assert all(path.stat().st_size for path in (tmp_path / "reports").iterdir())
+    manifest = json.loads(outputs["run_manifest"].read_text(encoding="utf-8"))
+    assert manifest["status"] == "empty"
+    review = json.loads((tmp_path / "runs" / "r1" / "review.json").read_text(encoding="utf-8"))
+    assert review[0]["Validation Rule"] == "empty_run"
+
+
+def test_json_run_directory_keeps_decimal_precision(tmp_path):
+    outputs = export_all(
+        "2026Q3",
+        "Capital Goods",
+        tmp_path / "reports",
+        [{"Ticker": "AAA.N0000", "Company": "AAA", "Flags": ""}],
+        [{"Fact ID": "AAA:1", "Extracted Value": Decimal("1234567890.123456789")}],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        run_dir=tmp_path / "runs" / "r2",
+        manifest={"run_id": "r2"},
+    )
+    facts = json.loads((tmp_path / "runs" / "r2" / "raw_facts.json").read_text(encoding="utf-8"))
+    assert facts[0]["Extracted Value"] == "1234567890.123456789"
+    manifest = json.loads(outputs["run_manifest"].read_text(encoding="utf-8"))
+    assert manifest["status"] == "ok" and manifest["counts"]["raw_facts"] == 1

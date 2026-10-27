@@ -112,3 +112,44 @@ def correction_candidates(corrections: list[dict], ticker: str, document: dict) 
             }
         )
     return matches
+
+
+def append_correction(path: Path, entry: dict, supersedes: str | None = None) -> dict:
+    """Append one validated correction; optionally mark an older one superseded.
+
+    Nothing is deleted. The old entry only gains ``status: superseded`` and a
+    pointer to its replacement, so the full history stays in the file.
+    """
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    header = "".join(line + "\n" for line in text.splitlines() if line.startswith("#"))
+    payload = yaml.safe_load(text) or {}
+    items = list(payload.get("corrections") or [])
+    entry = {**entry, "status": "active"}
+    existing_ids = {str(item["id"]) for item in items}
+    if "id" not in entry:
+        stem = f"{entry['ticker']}-{entry['metric']}-{entry['financial_period']}"
+        number = 1
+        while f"{stem}-{number}" in existing_ids:
+            number += 1
+        entry["id"] = f"{stem}-{number}"
+    if supersedes is not None:
+        old = next((item for item in items if str(item["id"]) == supersedes), None)
+        if old is None:
+            raise ValueError(f"No correction with id {supersedes!r} to supersede")
+        old["status"] = "superseded"
+        old["superseded_by"] = entry["id"]
+        entry["supersedes"] = supersedes
+    items.append(entry)
+    rendered = header + yaml.safe_dump(
+        {"corrections": items}, sort_keys=False, allow_unicode=True, default_flow_style=False
+    )
+    # Validate the whole file before touching the real one.
+    scratch = path.with_name(path.name + ".tmp")
+    scratch.write_text(rendered, encoding="utf-8")
+    try:
+        load_corrections(scratch)
+    except (TypeError, ValueError):
+        scratch.unlink(missing_ok=True)
+        raise
+    scratch.replace(path)
+    return entry

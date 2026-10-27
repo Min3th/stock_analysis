@@ -68,7 +68,21 @@ python main.py --sector "Capital Goods" --period 2026Q3
 python main.py --sector "Banks" --period 2026Q3
 python main.py --company HHL.N0000
 python main.py --company ACL.N0000 --period 2026Q3 --corrections config/corrections.yml
+python main.py run --sector "Banks" --period 2026Q3 --offline --run-dir data/runs/banks-q3
+python main.py extract --pdf path	oeport.pdf --kind annual_report --period-end 2026-03-31
+python main.py corrections add --ticker AAA.N0000 --metric revenue --value 1500 `
+  --unit "LKR million" --period-end 2026-03-31 --document "<exact title>" `
+  --source-page 12 --reason "OCR digit"
 ```
+
+Flags without a subcommand mean `run`. `--offline` uses only what is already in
+`data/raw` (universe, filing feed, announcements, market snapshots, PDFs); each
+miss becomes a manual-review warning instead of a network call, so a sector must
+have been run live once first. `--run-dir` also writes `manifest.json` and one
+JSON file per table (decimals as strings). `extract` prints the candidates,
+located statements, confidence and page citations for one PDF without touching
+the pipeline. `corrections add` appends to `config/corrections.yml` and, with
+`--supersedes ID`, marks the older entry superseded without deleting it.
 
 `--period` is the label written into the output filenames. It defaults to the
 current calendar quarter, so the quarterly rerun is just
@@ -83,7 +97,7 @@ Each run writes, under `reports/`:
 | `Capital_Goods_Screening_2026_Q3.csv` | The `01_Screening` table |
 | `Capital_Goods_Summary_2026_Q3.md` | Counts, sector medians, highest/lowest raw values, warnings |
 | `Capital_Goods_Universe_2026_Q3.csv` | Membership decisions |
-| `manual_review.csv`, `extraction_warnings.jsonl` | Every value that was withheld or flagged |
+| `Capital_Goods_Manual_Review_2026_Q3.csv`, `Capital_Goods_Extraction_Warnings_2026_Q3.jsonl` | Every value that was withheld or flagged, per sector and period |
 
 The raw-fact, ratio and history tables are also written as CSV under
 `data/processed/`.
@@ -97,9 +111,10 @@ Official CSE cash-dividend announcements are discovered on every run. Their
 structured details are cached under `data/raw/cse_announcements/`, attachments
 under the issuer cache, and results are written to `05_Dividends`.
 
-Each run also writes `reports/extraction_warnings.jsonl`. This machine-readable
-log mirrors missing, low-confidence, validation, and document-error records from
-`manual_review.csv`.
+Each run also writes `<Group>_Extraction_Warnings_<period>.jsonl`. This
+machine-readable log mirrors missing, low-confidence, validation, and
+document-error records from the manual-review CSV. A run that produces no
+screening rows writes no empty CSV; its review file and manifest say why.
 
 The Markdown summary reports processing confidence, sector medians, missing
 fields by ticker, neutral highest/lowest observed values, anomaly counts, and

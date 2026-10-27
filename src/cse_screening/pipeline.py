@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import subprocess
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -40,12 +43,24 @@ def run(
     company: str | None = None,
     root: Path = Path("."),
     correction_path: Path | None = None,
+    offline: bool = False,
+    run_dir: Path | None = None,
 ) -> dict[str, Path]:
+    started = datetime.now(UTC)
     config = yaml.safe_load((root / "config" / "companies.yml").read_text(encoding="utf-8"))
     pipeline_config = load_pipeline_config(root / "config")
+    config_hash = hashlib.sha256(
+        json.dumps(pipeline_config, sort_keys=True, default=str).encode()
+    ).hexdigest()[:16]
+    cache_root = root / str(pipeline_config.get("cache_directory", "data/raw"))
+    user_agent = str(pipeline_config.get("user_agent", "cse-screening-research/0.1"))
+    timeout = float(pipeline_config.get("request_timeout_seconds", 30))
+    delay = float(pipeline_config.get("request_delay_seconds", 0))
     configured = {item["ticker"]: item for item in config["companies"]}
     as_of = datetime.now(ZoneInfo("Asia/Colombo")).date()
-    group, cse_companies = CSEUniverseClient().companies(industry_group)
+    group, cse_companies = CSEUniverseClient(
+        timeout=timeout, user_agent=user_agent, cache_root=cache_root, offline=offline
+    ).companies(industry_group)
     companies, universe_audit = apply_universe_config(
         group, cse_companies, config.get("universe"), as_of
     )
@@ -67,7 +82,7 @@ def run(
     financial_feed_cached = False
     try:
         discovered, financial_feed_cached = CSEFinancialDocumentClient(
-            root / "data" / "raw"
+            cache_root, timeout=max(timeout, 120), user_agent=user_agent, offline=offline
         ).discover(companies, as_of)
         for issuer in companies:
             issuer["documents"] = _merge_documents(
@@ -75,21 +90,24 @@ def run(
             )
     except (httpx.HTTPError, OSError, TypeError, ValueError) as exc:
         financial_discovery_error = f"CSE financial filing discovery: {exc}"
-    downloader = CachedDownloader(root / "data" / "raw")
+    downloader = CachedDownloader(
+        cache_root, timeout=max(timeout, 60), user_agent=user_agent, delay=delay, offline=offline
+    )
     raw, sources, screening, ratios, history, review, dividends = [], [], [], [], [], [], []
     flag_context: dict[str, dict] = {}
     dividend_error = None
     try:
-        dividend_announcements = CSEDividendClient(root / "data" / "raw").latest_for_companies(
-            companies
-        )
+        dividend_announcements = CSEDividendClient(
+            cache_root, timeout=timeout, user_agent=user_agent, offline=offline
+        ).latest_for_companies(companies)
     except (httpx.HTTPError, OSError, ValueError) as exc:
         dividend_announcements = {}
         dividend_error = f"CSE dividend announcement feed: {exc}"
     thresholds = pipeline_config["flags"]
     liquidity_lookback = int(thresholds.get("liquidity_lookback_trading_days", 20))
-    liquidity_store = LiquidityStore(root / "data" / "raw")
-    liquidity_store.capture(companies)
+    liquidity_store = LiquidityStore(cache_root)
+    if not offline:
+        liquidity_store.capture(companies)
     liquidity = liquidity_store.summaries(
         [issuer["ticker"] for issuer in companies], liquidity_lookback
     )
@@ -113,8 +131,14 @@ def run(
         market = issuer.get("market_data")
         try:
             if market is None:
-                market = get_market_data(issuer["ticker"])
-        except (httpx.HTTPError, KeyError, ValueError) as exc:
+                market = get_market_data(
+                    issuer["ticker"],
+                    cache_root,
+                    offline=offline,
+                    timeout=timeout,
+                    user_agent=user_agent,
+                )
+        except (httpx.HTTPError, KeyError, OSError, ValueError) as exc:
             market = {
                 "price": None,
                 "market_cap": None,
@@ -493,7 +517,45 @@ def run(
         review,
         universe_audit,
         processed=root / str(pipeline_config.get("processed_directory", "data/processed")),
+        run_dir=run_dir,
+        manifest=_manifest(
+            root, run_dir, started, period, group["industry_group"], company, offline, config_hash
+        ),
     )
+
+
+def _manifest(
+    root: Path,
+    run_dir: Path | None,
+    started: datetime,
+    period: str,
+    industry_group: str,
+    ticker: str | None,
+    offline: bool,
+    config_hash: str,
+) -> dict:
+    try:
+        commit = subprocess.run(
+            ["git", "-c", f"safe.directory={root.as_posix()}", "rev-parse", "HEAD"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        commit = None
+    return {
+        "run_id": run_dir.name if run_dir else None,
+        "sector": industry_group,
+        "period": period,
+        "ticker": ticker,
+        "offline": offline,
+        "started_at": started.isoformat(),
+        "finished_at": datetime.now(UTC).isoformat(),
+        "git_commit": commit,
+        "config_hash": config_hash,
+    }
 
 
 def load_pipeline_config(config_directory: Path) -> dict:

@@ -7,7 +7,7 @@ processed_directory: data/processed
 reports_directory: reports
 request_timeout_seconds: 30
 request_delay_seconds: 1.0
-user_agent: cse-capital-goods-screening/0.1
+user_agent: cse-screening-research/0.1
 ocr:
   enabled: true
   minimum_text_characters_per_page: 80

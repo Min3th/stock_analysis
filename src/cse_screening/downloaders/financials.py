@@ -99,13 +99,31 @@ def _months_since(annual_end: date, interim_end: date) -> int | None:
 
 
 class CSEFinancialDocumentClient:
-    def __init__(self, cache_root: Path, timeout: float = 120) -> None:
+    def __init__(
+        self,
+        cache_root: Path,
+        timeout: float = 120,
+        user_agent: str = "cse-screening-research/0.4",
+        offline: bool = False,
+    ) -> None:
         self.cache_root = cache_root / "cse_financial_announcements"
         self.cache_root.mkdir(parents=True, exist_ok=True)
         self.timeout = timeout
+        self.user_agent = user_agent
+        self.offline = offline
 
     def filings(self, from_date: date, to_date: date) -> tuple[list[dict], bool]:
         cache = self.cache_root / f"{from_date.isoformat()}_{to_date.isoformat()}.json"
+        if self.offline:
+            # Cached windows are named by date; the newest one is the freshest feed.
+            newest = max(
+                (p for p in self.cache_root.glob("*.json") if p.stat().st_size),
+                key=lambda p: p.name,
+                default=None,
+            )
+            if newest is None:
+                raise OSError("Offline mode: no cached CSE financial filing feed")
+            return json.loads(newest.read_text(encoding="utf-8")), True
         if (
             cache.exists()
             and cache.stat().st_size
@@ -115,7 +133,7 @@ class CSEFinancialDocumentClient:
         response = httpx.post(
             FINANCIAL_ENDPOINT,
             data={"fromDate": from_date.isoformat(), "toDate": to_date.isoformat()},
-            headers={"User-Agent": "cse-screening-research/0.4"},
+            headers={"User-Agent": self.user_agent},
             timeout=self.timeout,
         )
         response.raise_for_status()

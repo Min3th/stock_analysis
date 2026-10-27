@@ -49,7 +49,7 @@ document discovery -> document registry -> content-addressed local cache
   period basis. `ratios.py` holds the null-safe arithmetic.
 - `exporters`: create the eight required screening sheets plus the auditable
   `00_Universe` membership sheet, machine-readable CSVs, Markdown summary, and
-  `manual_review.csv`.
+  the per-sector manual-review CSV.
 
 ## Data contracts
 
@@ -125,8 +125,8 @@ below `confidence_threshold` are not selected for the screening table; they
 stay in `02_Raw_Data` (`Used In Screening = no`) and in the review outputs.
 
 Every warning is emitted with candidate values, source page/text, strategy,
-validation rule, and reason to `manual_review.csv` and the line-delimited
-`extraction_warnings.jsonl`. Missing metrics and document/network failures use
+validation rule, and reason to the per-sector manual-review CSV and the line-delimited
+the per-sector extraction-warnings JSONL. Missing metrics and document/network failures use
 the same structured schema. This lets automated consumers distinguish absence,
 ambiguous extraction, accounting inconsistency, and source failure.
 

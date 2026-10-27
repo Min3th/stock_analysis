@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -52,14 +54,23 @@ def normalize_group_name(value: str) -> str:
 
 
 class CSEUniverseClient:
-    def __init__(self, timeout: float = 30) -> None:
+    def __init__(
+        self,
+        timeout: float = 30,
+        user_agent: str = "cse-screening-research/0.2",
+        cache_root: Path | None = None,
+        offline: bool = False,
+    ) -> None:
         self.timeout = timeout
+        self.user_agent = user_agent
+        self.cache_root = cache_root / "cse_universe" if cache_root else None
+        self.offline = offline
 
     def _post(self, endpoint: str, data: dict | None = None) -> Any:
         response = httpx.post(
             f"{CSE_API}/{endpoint}",
             data=data,
-            headers={"User-Agent": "cse-screening-research/0.2"},
+            headers={"User-Agent": self.user_agent},
             timeout=self.timeout,
         )
         response.raise_for_status()
@@ -99,6 +110,24 @@ class CSEUniverseClient:
         return match
 
     def companies(self, requested: str) -> tuple[dict, list[dict]]:
+        cache = None
+        if self.cache_root is not None:
+            slug = "_".join(re.findall(r"[a-z0-9]+", normalize_group_name(requested)))
+            cache = self.cache_root / f"{slug}.json"
+        if self.offline:
+            if cache is None or not cache.exists():
+                raise OSError(f"Offline mode: no cached CSE universe for {requested!r}")
+            payload = json.loads(cache.read_text(encoding="utf-8"))
+            return payload["group"], payload["companies"]
+        group, companies = self._live_companies(requested)
+        if cache is not None:
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            cache.write_text(
+                json.dumps({"group": group, "companies": companies}, indent=1), encoding="utf-8"
+            )
+        return group, companies
+
+    def _live_companies(self, requested: str) -> tuple[dict, list[dict]]:
         group = self.resolve_group(requested)
         response = self._post(
             "gics_sector_companies",

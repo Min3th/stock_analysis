@@ -87,8 +87,30 @@ def export_all(
     review: list[dict],
     universe: list[dict],
     processed: Path | None = None,
+    run_dir: Path | None = None,
+    manifest: dict | None = None,
 ) -> dict[str, Path]:
     output.mkdir(parents=True, exist_ok=True)
+    if not screening:
+        # An empty run is reported, never hidden behind a 0-byte CSV.
+        review = [
+            *review,
+            {
+                "Company": "",
+                "Ticker": "",
+                "Metric": "run",
+                "Financial Period": period,
+                "Candidate Values": "",
+                "Source Document": "",
+                "Source Page": "",
+                "Source Text": "",
+                "Extraction Strategy": "",
+                "Validation Rule": "empty_run",
+                "Reason for Uncertainty": (
+                    f"No screening rows were produced for {industry_group} {period}"
+                ),
+            },
+        ]
     safe_group = "_".join(re.findall(r"[A-Za-z0-9]+", industry_group))
     label = file_period_label(period)
     stem = f"{safe_group}_Screening_{label}"
@@ -96,8 +118,8 @@ def export_all(
     csv_path = output / f"{stem}.csv"
     summary_path = output / f"{safe_group}_Summary_{label}.md"
     universe_path = output / f"{safe_group}_Universe_{label}.csv"
-    review_path = output / "manual_review.csv"
-    warning_path = output / "extraction_warnings.jsonl"
+    review_path = output / f"{safe_group}_Manual_Review_{label}.csv"
+    warning_path = output / f"{safe_group}_Extraction_Warnings_{label}.jsonl"
 
     frames = {
         "00_Universe": pd.DataFrame(universe),
@@ -114,23 +136,24 @@ def export_all(
         for sheet in SHEETS:
             frames[sheet].to_excel(writer, sheet_name=sheet, index=False)
         _format_workbook(writer.book)
-    frames["01_Screening"].to_csv(csv_path, index=False)
-    frames["00_Universe"].to_csv(universe_path, index=False)
-    pd.DataFrame(review).to_csv(review_path, index=False)
+    outputs: dict[str, Path] = {"xlsx": workbook_path}
+    for kind, path, table in (
+        ("csv", csv_path, frames["01_Screening"]),
+        ("universe_csv", universe_path, frames["00_Universe"]),
+        ("review", review_path, pd.DataFrame(review)),
+    ):
+        # A frame with no columns would be written as a 0-byte file.
+        if len(table.columns):
+            table.to_csv(path, index=False)
+            outputs[kind] = path
     warning_path.write_text(
         "".join(json.dumps(item, default=str) + "\n" for item in review), encoding="utf-8"
     )
     summary_path.write_text(
         _neutral_markdown_summary(period, industry_group, screening, review), encoding="utf-8"
     )
-    outputs = {
-        "xlsx": workbook_path,
-        "csv": csv_path,
-        "markdown": summary_path,
-        "universe_csv": universe_path,
-        "review": review_path,
-        "warnings": warning_path,
-    }
+    outputs["markdown"] = summary_path
+    outputs["warnings"] = warning_path
     if processed is not None:
         # Machine-readable copies of the audit tables for use outside Excel.
         processed.mkdir(parents=True, exist_ok=True)
@@ -142,7 +165,50 @@ def export_all(
             path = processed / f"{safe_group}_{label}_{name}.csv"
             frames[sheet].to_csv(path, index=False)
             outputs[f"processed_{name}"] = path
+    if run_dir is not None:
+        frames["review"] = pd.DataFrame(review)
+        outputs["run_manifest"] = export_json(
+            run_dir, frames, {**(manifest or {}), "outputs": outputs, "empty": not screening}
+        )
     return outputs
+
+
+JSON_TABLES = {
+    "universe": "00_Universe",
+    "screening": "01_Screening",
+    "raw_facts": "02_Raw_Data",
+    "ratios": "03_Ratios",
+    "history": "04_History",
+    "dividends": "05_Dividends",
+    "sources": "06_Sources",
+    "flags": "07_Flags",
+    "review": "review",
+}
+
+
+def export_json(run_dir: Path, frames: dict[str, pd.DataFrame], manifest: dict) -> Path:
+    """Write one JSON file per table and a manifest into ``run_dir``.
+
+    Decimals and dates are serialized as strings so no precision is lost.
+    """
+    run_dir.mkdir(parents=True, exist_ok=True)
+    counts = {}
+    for name, sheet in JSON_TABLES.items():
+        table = frames.get(sheet, pd.DataFrame())
+        records = table.astype(object).where(table.notna(), None).to_dict(orient="records")
+        counts[name] = len(records)
+        (run_dir / f"{name}.json").write_text(
+            json.dumps(records, default=str, indent=1), encoding="utf-8"
+        )
+    status = "empty" if manifest.get("empty") else "ok"
+    manifest = {
+        **{key: value for key, value in manifest.items() if key != "empty"},
+        "status": status,
+        "counts": counts,
+    }
+    path = run_dir / "manifest.json"
+    path.write_text(json.dumps(manifest, default=str, indent=1), encoding="utf-8")
+    return path
 
 
 def _format_workbook(workbook) -> None:
@@ -421,7 +487,7 @@ def _neutral_markdown_summary(
         "",
         "## Extraction warnings",
         "",
-        f"Manual-review items: {len(review)}. Every item is listed in `manual_review.csv`.",
+        f"Manual-review items: {len(review)}. Every item is listed in the sector's manual-review CSV.",
     ]
     for rule, group in sorted(warning_groups.items()):
         tickers = sorted(group["tickers"])
