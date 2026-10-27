@@ -69,7 +69,8 @@ python main.py --sector "Banks" --period 2026Q3
 python main.py --company HHL.N0000
 python main.py --company ACL.N0000 --period 2026Q3 --corrections config/corrections.yml
 python main.py run --sector "Banks" --period 2026Q3 --offline --run-dir data/runs/banks-q3
-python main.py extract --pdf path	oeport.pdf --kind annual_report --period-end 2026-03-31
+python main.py extract --pdf path	o
+eport.pdf --kind annual_report --period-end 2026-03-31
 python main.py corrections add --ticker AAA.N0000 --metric revenue --value 1500 `
   --unit "LKR million" --period-end 2026-03-31 --document "<exact title>" `
   --source-page 12 --reason "OCR digit"
@@ -83,6 +84,14 @@ JSON file per table (decimals as strings). `extract` prints the candidates,
 located statements, confidence and page citations for one PDF without touching
 the pipeline. `corrections add` appends to `config/corrections.yml` and, with
 `--supersedes ID`, marks the older entry superseded without deleting it.
+
+`uploads add --pdf FILE --ticker T --kind annual_report|interim_statement
+--period-end YYYY-MM-DD [--period-months N]` checks the `%PDF` header and that
+the ticker is in the CSE universe, stores the file as
+`data/raw/<TICKER>/uploads/<sha256[:16]>.pdf` and appends its checksum, original
+filename and upload time to `config/uploads.yml`. Uploads are a document
+fallback: they never change membership metadata, an official CSE filing for the
+same period always wins, and `06_Sources` marks them `Source Type = user_upload`.
 
 `--period` is the label written into the output filenames. It defaults to the
 current calendar quarter, so the quarterly rerun is just

@@ -14,12 +14,13 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from cse_screening.corrections import append_correction
+from cse_screening.downloaders.local import known_tickers, register_upload
 from cse_screening.periods import current_period, period_label
 from cse_screening.pipeline import load_pipeline_config, run
 from cse_screening.preview import extract_preview
 
 ROOT = Path(__file__).parent
-SUBCOMMANDS = {"run", "extract", "corrections"}
+SUBCOMMANDS = {"run", "extract", "corrections", "uploads"}
 
 
 def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
@@ -58,6 +59,16 @@ def _parser() -> argparse.ArgumentParser:
     extract.add_argument("--kind", choices=["annual_report", "interim_statement"], required=True)
     extract.add_argument("--period-end", required=True, help="YYYY-MM-DD")
     extract.add_argument("--period-months", type=int)
+
+    uploads = commands.add_parser("uploads", help="Register user-supplied filings")
+    upload_actions = uploads.add_subparsers(dest="action", required=True)
+    upload = upload_actions.add_parser("add", help="Store a PDF and record its provenance")
+    upload.add_argument("--pdf", type=Path, required=True)
+    upload.add_argument("--ticker", required=True)
+    upload.add_argument("--kind", choices=["annual_report", "interim_statement"], required=True)
+    upload.add_argument("--period-end", required=True, help="YYYY-MM-DD")
+    upload.add_argument("--period-months", type=int)
+    upload.add_argument("--title")
 
     corrections = commands.add_parser("corrections", help="Manage manual corrections")
     actions = corrections.add_subparsers(dest="action", required=True)
@@ -127,6 +138,28 @@ def _extract_command(parser: argparse.ArgumentParser, args: argparse.Namespace) 
     print()
 
 
+def _uploads_command(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    period_end = _iso_date(parser, args.period_end, "--period-end")
+    settings = load_pipeline_config(ROOT / "config")
+    cache_directory = str(settings.get("cache_directory", "data/raw"))
+    try:
+        record = register_upload(
+            ROOT,
+            ROOT / cache_directory,
+            ROOT / "config" / "uploads.yml",
+            args.ticker,
+            args.pdf,
+            kind=args.kind,
+            period_end=period_end,
+            title=args.title,
+            period_months=args.period_months,
+            allowed_tickers=known_tickers(ROOT, cache_directory),
+        )
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    print(f"upload: {record['sha256'][:16]} {record['path']}")
+
+
 def _corrections_command(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     period_end = _iso_date(parser, args.period_end, "--period-end")
     entry = {
@@ -163,6 +196,8 @@ def main(argv: list[str] | None = None) -> None:
         _run_command(parser, args)
     elif args.command == "extract":
         _extract_command(parser, args)
+    elif args.command == "uploads":
+        _uploads_command(parser, args)
     else:
         _corrections_command(parser, args)
 

@@ -25,6 +25,7 @@ from .downloaders.announcements import CSEDividendClient, dividend_type
 from .downloaders.financials import CSEFinancialDocumentClient
 from .downloaders.http import CachedDownloader, get_market_data
 from .downloaders.liquidity import LiquidityStore
+from .downloaders.local import upload_documents
 from .downloaders.universe import CSEUniverseClient, apply_universe_config
 from .exporters.workbook import export_all
 from .extractors.statements import (
@@ -90,6 +91,13 @@ def run(
             )
     except (httpx.HTTPError, OSError, TypeError, ValueError) as exc:
         financial_discovery_error = f"CSE financial filing discovery: {exc}"
+    uploads = upload_documents(root / "config" / "uploads.yml", root)
+    for issuer in companies:
+        if issuer["ticker"] in uploads:
+            # Uploads rank below official filings for the same period.
+            issuer["documents"] = _merge_documents(
+                [], [*issuer.get("documents", []), *uploads[issuer["ticker"]]]
+            )
     downloader = CachedDownloader(
         cache_root, timeout=max(timeout, 60), user_agent=user_agent, delay=delay, offline=offline
     )
@@ -160,9 +168,12 @@ def run(
         raw_by_id: dict[str, dict] = {}
         for document in issuer.get("documents", []):
             try:
-                path, checksum, cached = downloader.download(
-                    issuer["ticker"], document["url"], document["title"]
-                )
+                if document.get("local_file"):
+                    path, checksum, cached = _read_upload(document)
+                else:
+                    path, checksum, cached = downloader.download(
+                        issuer["ticker"], document["url"], document["title"]
+                    )
                 parsed = extract_document(path, pipeline_config)
                 pages = parsed.pages
                 for warning in parsed.warnings:
@@ -244,6 +255,9 @@ def run(
                         "Discovery Cache Hit": financial_feed_cached
                         if document.get("discovery_url")
                         else None,
+                        "Source Type": document.get("source_type", "cse_or_configured"),
+                        "Original Filename": document.get("original_filename"),
+                        "Uploaded UTC": document.get("uploaded_utc"),
                         "Parsing Methods": "; ".join(sorted(set(parsed.methods))),
                         "Parser Warnings": len(parsed.warnings),
                     }
@@ -883,13 +897,26 @@ def _merge_documents(discovered: list[dict], configured: list[dict]) -> list[dic
             key = str(item.get("period_end") or "")
             prior = by_period.get(key)
             rank = (
+                item.get("source_type") != "user_upload",
                 str(item.get("publication_date") or ""),
                 bool(item.get("discovery_url")),
             )
             if prior is None or rank > (
+                prior.get("source_type") != "user_upload",
                 str(prior.get("publication_date") or ""),
                 bool(prior.get("discovery_url")),
             ):
                 by_period[key] = item
         selected.extend(by_period[key] for key in sorted(by_period, reverse=True)[:limit])
     return selected
+
+
+def _read_upload(document: dict) -> tuple[Path, str, bool]:
+    """A user upload from the cache, refusing a file that no longer matches its checksum."""
+    path = Path(document["local_file"])
+    if not path.is_file():
+        raise OSError(f"uploaded file is missing: {path}")
+    checksum = hashlib.sha256(path.read_bytes()).hexdigest()
+    if checksum != document["sha256"]:
+        raise ValueError(f"uploaded file {path.name} no longer matches its recorded checksum")
+    return path, checksum, True
