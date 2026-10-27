@@ -15,6 +15,7 @@ from datetime import date
 from decimal import Decimal
 
 from ..periods import ttm_from_annual_and_ytd
+from .dividends import FinancialYearDividend
 from .ratios import (
     cagr,
     debt_to_equity,
@@ -99,6 +100,7 @@ SCREEN_COLUMNS = [
     "Liquidity Trading Days",
     "Liquidity Period",
     "Not Applicable Metrics",
+    "DPS Basis",
 ]
 
 
@@ -495,7 +497,11 @@ def _not_meaningful(denominator: Decimal | None) -> str | None:
 
 
 def screening_metrics(
-    snapshot: Snapshot, price: Decimal | None, history: list[dict], profile: str | None = None
+    snapshot: Snapshot,
+    price: Decimal | None,
+    history: list[dict],
+    profile: str | None = None,
+    announced: FinancialYearDividend | None = None,
 ) -> tuple[dict, list[dict]]:
     """Calculate every screening metric and its lineage rows.
 
@@ -688,6 +694,22 @@ def screening_metrics(
     eps = eps_fact["value"] if eps_fact else None
     annual_eps = snapshot.annual_value("eps")
     dps = snapshot.annual_value("dps")
+    dps_basis = "statement" if dps is not None else None
+    dps_note = None
+    if (
+        dps is None
+        and announced is not None
+        and announced.complete
+        and announced.fy_end == snapshot.annual_end
+    ):
+        # The statement shows no DPS, but the cash dividends announced for this
+        # financial year (including its final) are complete.
+        dps, dps_basis = announced.dps, "announced_fy"
+        dps_note = (
+            f"No DPS row accepted from the statements; sum of announced cash dividends "
+            f"({', '.join(announced.types)}), CSE announcement IDs "
+            f"{', '.join(map(str, announced.announcement_ids))}."
+        )
     shares = snapshot.annual_value("ordinary_shares_outstanding")
     reported_bvps = annual.get("bvps")
     if reported_bvps is not None:
@@ -700,6 +722,22 @@ def screening_metrics(
     values["Book Value Per Share"] = bvps
     values["Ordinary Shares Outstanding"] = shares
     values["DPS"] = dps
+    values["DPS Basis"] = dps_basis
+    rows.append(
+        _ratio(
+            ticker,
+            "DPS",
+            dps,
+            "Statement DPS"
+            if dps_basis != "announced_fy"
+            else "Sum of announced cash dividends for the financial year",
+            dps,
+            None,
+            fy,
+            annual.get("dps"),
+            notes=dps_note,
+        )
+    )
     rows.append(
         _ratio(
             ticker,
@@ -768,6 +806,7 @@ def screening_metrics(
             price,
             fy,
             annual.get("dps"),
+            notes=dps_note,
         )
     )
     rows.append(
@@ -781,7 +820,7 @@ def screening_metrics(
             fy,
             annual.get("dps"),
             annual.get("eps"),
-            notes=_not_meaningful(annual_eps),
+            notes=_join_notes(dps_note, _not_meaningful(annual_eps)),
         )
     )
     values["Income Period Basis"] = income_label

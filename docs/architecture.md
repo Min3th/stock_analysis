@@ -105,6 +105,20 @@ empty, `03_Ratios` marks them `not_applicable` with the reason, and
 `Not Applicable Metrics` lists them, so they are not reported as missing.
 A unit header such as "(Amounts in LKR Thousands)" is recognised.
 
+## Financial-year dividends
+
+`calculations/dividends.py` maps each cash-dividend announcement to the financial
+year in its "for the financial year" field and sums interim and final dividends
+for that year (voting amount for `.N` tickers, non-voting for `.X`). Scrip,
+bonus and rights announcements are excluded, an amended announcement replaces the
+earlier one, and unclassifiable types are ignored. A year is complete only once a
+final or first-and-final dividend exists. When the statements give no DPS and
+the latest financial year is complete, `DPS` uses the announced total with
+`DPS Basis = announced_fy` and the announcement IDs in `03_Ratios`. A partial
+year (interims only) is never used. When both exist and differ by more than 5%,
+the statement value stays and a `dps_mismatch` review item is written. The CSE
+feed only exposes recent announcements, so older years are often absent.
+
 ## Debt, cash flow, and return policies
 
 - Total debt is the sum of interest-bearing borrowings, term and import loans,

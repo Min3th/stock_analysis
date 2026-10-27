@@ -406,8 +406,10 @@ they are never used as company-specific facts.
   share count over the period.
 - DPS comes from the annual report (income statement or highlights). Many
   issuers print it only in notes, so it is often missing. `05_Dividends` lists
-  the CSE cash-dividend announcements in the current disclosure window; they
-  are not yet combined into a financial-year DPS.
+  the CSE cash-dividend announcements in the current disclosure window. When
+  the statements give no DPS and the year's final dividend has been announced,
+  the announced total is used (`DPS Basis = announced_fy`); the CSE feed only
+  exposes recent announcements, so older years are often absent.
 - Operating profit is taken only from the income statement. Issuers that do not
   print such a row have no operating profit or EBIT proxy.
 - Total debt sums borrowings, term and import loans, debentures and bank
@@ -443,9 +445,7 @@ they are never used as company-specific facts.
 5. Primary-statement extraction, period-safe metrics with lineage, and the
    reliability gate (complete for the Capital Goods sample; see the first
    limitation above).
-6. Next: manual spot-checks recorded as fixtures, half-year and nine-month
-   interim filings, financial-year DPS from dividend announcements, and
-   statement rows for financial-sector industry groups.
+6. Next: manual spot-checks recorded as fixtures and an end-to-end test.
 
 ## Neutrality policy
 

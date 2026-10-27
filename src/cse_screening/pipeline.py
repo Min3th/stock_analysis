@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import yaml
 
+from .calculations.dividends import dps_conflict, financial_year_dividends
 from .calculations.screening import (
     NOT_APPLICABLE_FACTS,
     SCREEN_COLUMNS,
@@ -376,7 +377,37 @@ def run(
             raw_by_id[market_fact["fact_id"]] = record = _market_fact_record(issuer, market_fact)
             raw.append(record)
         snapshot = build_snapshot(issuer["ticker"], document_facts, usable)
-        metrics, lineage = screening_metrics(snapshot, price, observations, profile)
+        announced = financial_year_dividends(
+            dividend_announcements.get(issuer["ticker"], []), issuer["ticker"]
+        ).get(snapshot.annual_end)
+        metrics, lineage = screening_metrics(snapshot, price, observations, profile, announced)
+        statement_dps = snapshot.annual_value("dps")
+        if (
+            statement_dps is not None
+            and announced is not None
+            and announced.complete
+            and dps_conflict(statement_dps, announced.dps)
+        ):
+            review.append(
+                {
+                    "Company": issuer["name"],
+                    "Ticker": issuer["ticker"],
+                    "Metric": "dps",
+                    "Financial Period": str(snapshot.annual_end),
+                    "Candidate Values": f"statement {statement_dps}; announced {announced.dps}",
+                    "Source Document": "",
+                    "Source Page": "",
+                    "Source Text": "",
+                    "Extraction Strategy": "announced_fy",
+                    "Validation Rule": "dps_mismatch",
+                    "Reason for Uncertainty": (
+                        "Statement DPS differs from the cash dividends announced for the same "
+                        f"financial year (announcement IDs "
+                        f"{', '.join(map(str, announced.announcement_ids))}); the statement "
+                        "value is used."
+                    ),
+                }
+            )
         for fact in snapshot.annual.values():
             raw_by_id[fact["fact_id"]]["Used In Screening"] = "yes"
         for fact in snapshot.ttm.values():
