@@ -48,3 +48,19 @@ export function harness(build?: CommandBuilder, env: NodeJS.ProcessEnv = {}): Ha
   const queue = new JobQueue(config, db, build);
   return { config, db, queue, app: createApp(config, db, queue), root };
 }
+
+/** Inserts a finished run whose run directory holds the given JSON tables. */
+export function seedRun(h: Harness, id: string, tables: Record<string, unknown[]>): string {
+  const runDir = path.join(h.config.repoRoot, "data", "runs", id);
+  fs.mkdirSync(runDir, { recursive: true });
+  for (const [name, rows] of Object.entries(tables)) {
+    fs.writeFileSync(path.join(runDir, `${name}.json`), JSON.stringify(rows));
+  }
+  h.db
+    .prepare(
+      `INSERT INTO runs (id, sector, period, status, run_dir, created_at)
+       VALUES (?, 'Capital Goods', '2026Q3', 'ok', ?, ?)`,
+    )
+    .run(id, runDir, new Date().toISOString());
+  return runDir;
+}

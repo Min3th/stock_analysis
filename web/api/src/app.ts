@@ -2,8 +2,10 @@ import express from "express";
 import type { Config } from "./config.js";
 import type { Db } from "./db.js";
 import type { JobQueue } from "./jobs.js";
+import { documentsRouter } from "./routes/documents.js";
 import { healthRouter } from "./routes/health.js";
 import { runsRouter } from "./routes/runs.js";
+import { tablesRouter } from "./routes/tables.js";
 import { universeRouter } from "./routes/universe.js";
 
 export function createApp(config: Config, db: Db, queue: JobQueue): express.Express {
@@ -30,6 +32,8 @@ export function createApp(config: Config, db: Db, queue: JobQueue): express.Expr
   app.use("/api", healthRouter(config, db));
   app.use("/api", universeRouter(config));
   app.use("/api", runsRouter(queue));
+  app.use("/api", tablesRouter(queue));
+  app.use("/api", documentsRouter(config, queue));
 
   app.use("/api", (_req, res) => {
     res.status(404).json({ error: "not_found" });

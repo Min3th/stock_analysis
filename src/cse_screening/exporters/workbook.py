@@ -183,6 +183,7 @@ JSON_TABLES = {
     "sources": "06_Sources",
     "flags": "07_Flags",
     "review": "review",
+    "summary": "08_Summary",
 }
 
 

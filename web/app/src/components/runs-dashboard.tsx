@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api, isActive, type Run } from "@/lib/api";
 import { LiveLog } from "./live-log";
@@ -88,6 +89,11 @@ export function RunsDashboard() {
                     <td className="px-3 py-2 text-right tabular-nums">{run.counts?.review ?? "—"}</td>
                     <td className="px-3 py-2 font-mono text-xs">{run.gitCommit?.slice(0, 7) ?? "—"}</td>
                     <td className="px-3 py-2 text-right">
+                      {(run.status === "ok" || run.status === "empty") && (
+                        <Link href={`/runs/${run.id}`} className="mr-3 text-xs text-accent hover:underline">
+                          Results
+                        </Link>
+                      )}
                       <button
                         type="button"
                         onClick={() => setWatching(run.id)}
