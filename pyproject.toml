@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "cse-capital-goods-screening"
+name = "cse-screening"
 version = "0.1.0"
-description = "Traceable quarterly screening pipeline for CSE Capital Goods companies"
+description = "Traceable quarterly screening pipeline for Colombo Stock Exchange industry groups"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

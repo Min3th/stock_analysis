@@ -37,7 +37,10 @@ investor-relations sources.
 ## Repository map
 
 ```text
-main.py                              CLI entry point
+main.py                              CLI: run (default), extract, corrections add, uploads add
+scripts/coverage_report.py          fill and reconciliation rates per cached industry group
+config/uploads.yml                  append-only user-supplied filings (written by `uploads add`)
+data/runs/<run_id>/                 JSON tables + manifest.json when --run-dir is given (git-ignored)
 config/companies.yml                universe overlay and document fallbacks
 config/corrections.yml              persistent, append-only fact corrections
 config/pipeline.example.yml         default settings and thresholds
@@ -125,7 +128,16 @@ representative real run is:
 ```powershell
 python main.py --company ACL.N0000 --period 2026Q3
 python main.py --sector "Capital Goods" --period 2026Q3
+python main.py run --sector Banks --period 2026Q3 --offline --run-dir data/runs/banks-q3
+python main.py extract --pdf report.pdf --kind annual_report --period-end 2026-03-31
+python scripts/coverage_report.py
 ```
+
+`--offline` reads only `data/raw`; a sector must have been run live once. The
+run directory contract is `manifest.json` (run id, sector, period, ticker, times,
+git commit, config hash, counts, output paths, `status` of `ok` or `empty`) plus
+one JSON file per table (`universe`, `screening`, `raw_facts`, `ratios`,
+`history`, `dividends`, `sources`, `flags`, `review`); decimals are strings.
 
 Live runs contact CSE and can be slow. Do not treat a network outage as a code
 failure without checking cached/fixture behavior. Do not commit files under
@@ -178,6 +190,13 @@ regression-sensitive:
 - Complete descriptive anomaly families, sector comparisons, and captured
   multi-day liquidity history.
 - Formatted Excel output and neutral Markdown sector summaries.
+- Per-sector review and warning files, offline mode, JSON run directories, the
+  `extract` and `corrections add` commands, and checksummed user uploads
+  (official CSE filings win over uploads, which win over issuer IR links).
+- Bank and insurer statement rows with `not_applicable` ratios, financial-year
+  DPS from announcements, lease liabilities, dual-class share counts, and
+  half-year interim layouts checked against real filings.
+- Statement fixtures under `tests/fixtures/` and an offline end-to-end test.
 
 Recent implementation history is available through `git log --oneline`. Do not
 infer that a feature is correct only because it is listed here; confirm behavior
@@ -187,11 +206,11 @@ with tests and current code before extending it.
 
 Use the `Known limitations` section of `README.md` as the authoritative current
 list. The extraction has been checked against accounting identities on the
-cached text of the Capital Goods filings, not by hand against the PDFs. Typical
-next work includes manual spot-checks recorded as fixtures, half-year and
-nine-month interim filings, financial-year DPS from dividend announcements,
-statement rows for financial-sector groups, expanded OCR coverage, company-IR
-fallback discovery, and longer liquidity histories.
+cached text of the filings and against figures transcribed from saved statement
+pages (`docs/technical-risks.md`, "Status of the gate"), not re-read from the PDF
+images. Typical next work includes running the 19 industry groups that are not
+cached, a fully scanned Capital Goods report fixture, the ABL, COMB and NDB bank
+layouts, and longer liquidity histories.
 
 A useful regression check for extraction changes is to rerun a sector from the
 cached page text and compare the screening CSV before and after; a change that

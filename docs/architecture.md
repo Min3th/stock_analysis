@@ -105,6 +105,24 @@ empty, `03_Ratios` marks them `not_applicable` with the reason, and
 `Not Applicable Metrics` lists them, so they are not reported as missing.
 A unit header such as "(Amounts in LKR Thousands)" is recognised.
 
+## Command line, run directory and uploads
+
+`main.py` has four entry points: `run` (the default when only flags are given),
+`extract` (a JSON preview of one PDF through `preview.extract_preview`, with
+page citations and confidence, that never reaches the screening table),
+`corrections add` (append-only writes to `config/corrections.yml` through
+`corrections.append_correction`; `--supersedes` marks the older entry
+`superseded`) and `uploads add` (`downloaders/local.register_upload`: `%PDF`
+header check, universe check, copy to `data/raw/<TICKER>/uploads/<sha16>.pdf`,
+provenance in `config/uploads.yml`).
+
+`run --offline` makes every downloader read only `data/raw`; a miss raises an
+`OSError` that becomes a manual-review `document_error`, never a network call.
+`run --run-dir DIR` additionally writes `manifest.json` and one JSON file per
+table next to the Excel and CSV outputs (decimals as strings). A run with no
+screening rows writes `status: "empty"` and an `empty_run` review item instead of
+a 0-byte CSV. Review and warning files are named per sector and period.
+
 ## Share classes, leases and issuer IR
 
 `extract_share_classes` reads the voting and non-voting counts from a stated-
