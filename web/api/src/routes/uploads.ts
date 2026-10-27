@@ -145,7 +145,7 @@ export function uploadsRouter(config: Config, db: Db, python: PythonRunner): Rou
       if (!row) return fail(res, 404, "not_found", "No such upload");
       if (row.status !== "pending") return fail(res, 409, "not_pending", `This upload was already ${row.status}.`);
       const title = typeof req.body?.title === "string" && req.body.title.trim() ? req.body.title.trim().slice(0, 200) : row.original_filename;
-      const args = ["uploads", "add", "--pdf", row.stored_path, "--ticker", row.ticker, "--kind", row.kind, "--period-end", row.period_end, "--title", title, "--original-name", row.original_filename];
+      const args = ["uploads", "add", "--pdf", row.stored_path, "--ticker", row.ticker, "--kind", row.kind, "--period-end", row.period_end, `--title=${title}`, `--original-name=${row.original_filename}`];
       if (row.period_months) args.push("--period-months", String(row.period_months));
       const result = await python(args);
       if (result.code !== 0) {

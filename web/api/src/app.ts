@@ -3,6 +3,7 @@ import type { Config } from "./config.js";
 import type { Db } from "./db.js";
 import type { JobQueue } from "./jobs.js";
 import { pythonRunner, type PythonRunner } from "./python.js";
+import { correctionsRouter } from "./routes/corrections.js";
 import { documentsRouter } from "./routes/documents.js";
 import { healthRouter } from "./routes/health.js";
 import { runsRouter } from "./routes/runs.js";
@@ -45,7 +46,9 @@ export function createApp(
   app.use("/api", runsRouter(queue));
   app.use("/api", tablesRouter(queue));
   app.use("/api", documentsRouter(config, queue));
-  app.use("/api", uploadsRouter(config, db, deps.python ?? pythonRunner(config)));
+  const python = deps.python ?? pythonRunner(config);
+  app.use("/api", uploadsRouter(config, db, python));
+  app.use("/api", correctionsRouter(db, python));
 
   app.use("/api", (_req, res) => {
     res.status(404).json({ error: "not_found" });

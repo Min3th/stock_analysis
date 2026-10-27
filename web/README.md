@@ -41,6 +41,15 @@ and runs `main.py extract` for the preview (nothing is stored in the pipeline ye
 /api/uploads/:id/accept` calls `main.py uploads add`, which re-checks the universe and is the
 only writer of `config/uploads.yml`; `DELETE /api/uploads/:id` discards it.
 
+## Review and corrections
+
+`GET /api/runs/:id/review` lists withheld and flagged values; the review page shows the cited PDF page
+beside each item. `POST /api/corrections` validates the fields (metric name, plain number, unit and
+scope allow-lists, page, reason) and calls `main.py corrections add` with `--flag=value` arguments, so
+`config/corrections.yml` is only ever written by Python. A correction never edits a published run: the
+original extraction stays on record and the next run of that company applies the correction, marking an
+older one `superseded` when `supersedes` is given.
+
 ## Notes
 
 - Node 20 or later. `better-sqlite3` is a native module; the install downloads a

@@ -54,7 +54,7 @@ describe("uploads", () => {
     expect(accepted.body.status).toBe("accepted");
     expect(h.calls[1]).toEqual([
       "uploads", "add", "--pdf", stored, "--ticker", "ACL.N0000", "--kind", "annual_report",
-      "--period-end", "2026-03-31", "--title", "ACL AR 2026", "--original-name", "evil name.pdf",
+      "--period-end", "2026-03-31", "--title=ACL AR 2026", "--original-name=evil name.pdf",
     ]);
     expect(fs.existsSync(stored)).toBe(false);
     expect((await request(h.app).post(`/api/uploads/${created.body.id}/accept`).send({})).status).toBe(409);
