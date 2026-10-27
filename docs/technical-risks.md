@@ -26,3 +26,28 @@ otherwise irregular report. Required checks include statement equation
 validation, correct comparative-year columns, unit normalization, output
 lineage, and deterministic reruns from cache.
 
+
+### Status of the gate
+
+Fixtures live in `tests/fixtures/<TICKER>/<document>/` as `pages.json` (the located
+statement pages, keyed by the report's own page number) and `expected.yml` (the
+printed figures with their pages), checked by `tests/test_fixture_regression.py`:
+
+| Layout | Fixture |
+| --- | --- |
+| Conventional digital report | EBCR.N0000 annual report 2026 |
+| Difficult tables | ASHO.N0000 (table-parsed, single column pair), DOCK.N0000 (wrapped labels, restated comparatives, a loss year) |
+| Scanned / OCR | SDB.N0000 audited statements 2024: the OCR'd cash-flow page only |
+| Bank | SEYB.N0000 annual report 2025 |
+
+Limits of this evidence, stated plainly:
+
+- The recorded figures were transcribed from the saved page text of each
+  statement and checked for internal consistency (assets = liabilities + equity
+  where all three print); they were not re-read from a rendered image of the PDF
+  by a second person.
+- No Capital Goods report in the cache has OCR'd statement pages. The OCR
+  fixture is therefore a bank's cash-flow statement, and a fully scanned
+  Capital Goods report is still an open gap.
+- `tests/test_pipeline_e2e.py` runs `pipeline.run(offline=True)` on a fixture
+  cache and checks the output files, manifest, lineage and a byte-identical rerun.

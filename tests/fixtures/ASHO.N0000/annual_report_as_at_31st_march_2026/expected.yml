@@ -1,0 +1,24 @@
+read_from: page text of the statements in pages.json; each value is the printed figure
+  for the current year, scaled by the stated unit
+profile: null
+unit: full rupees
+scope: single column pair, current year first
+facts:
+- metric: revenue
+  value: '19330408115'
+  page: 75
+- metric: net_profit
+  value: '3062433838'
+  page: 75
+- metric: eps
+  value: '845.78'
+  page: 75
+- metric: total_assets
+  value: '16680638788'
+  page: 76
+- metric: total_liabilities
+  value: '7703712444'
+  page: 76
+- metric: operating_cash_flow
+  value: '3484394588'
+  page: 78

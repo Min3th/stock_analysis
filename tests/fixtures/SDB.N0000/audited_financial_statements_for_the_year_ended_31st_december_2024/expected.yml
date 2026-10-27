@@ -1,0 +1,12 @@
+read_from: page text of the statements in pages.json; each value is the printed figure
+  for the current year, scaled by the stated unit
+profile: bank
+unit: full rupees
+scope: OCR (tesseract) page; only the cash-flow statement is in the fixture
+facts:
+- metric: operating_cash_flow
+  value: '3029494240'
+  page: 10
+- metric: capital_expenditure
+  value: '-429588159'
+  page: 10

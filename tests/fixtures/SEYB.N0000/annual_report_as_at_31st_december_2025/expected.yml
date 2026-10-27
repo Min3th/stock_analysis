@@ -1,0 +1,27 @@
+read_from: page text of the statements in pages.json; each value is the printed figure
+  for the current year, scaled by the stated unit
+profile: bank
+unit: LKR '000 (values below are in LKR)
+scope: Bank column (first value column), current year
+facts:
+- metric: revenue
+  value: '48132737000'
+  page: 237
+- metric: net_profit
+  value: '12108297000'
+  page: 237
+- metric: eps
+  value: '19.05'
+  page: 237
+- metric: total_assets
+  value: '921003173000'
+  page: 239
+- metric: total_liabilities
+  value: '839089238000'
+  page: 239
+- metric: total_equity
+  value: '81913935000'
+  page: 239
+- metric: operating_cash_flow
+  value: '-11964329000'
+  page: 244

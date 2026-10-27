@@ -1,0 +1,21 @@
+read_from: page text of the statements in pages.json; each value is the printed figure
+  for the current year, scaled by the stated unit
+profile: null
+unit: Rs. '000 (values below are in LKR)
+scope: Group, current year; a loss year with a restated comparative
+facts:
+- metric: revenue
+  value: '36196077000'
+  page: 135
+- metric: net_profit
+  value: '-2920728000'
+  page: 135
+- metric: eps
+  value: '-11.34'
+  page: 135
+- metric: total_assets
+  value: '38347971000'
+  page: 136
+- metric: total_equity
+  value: '15501205000'
+  page: 136

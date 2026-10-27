@@ -1,0 +1,18 @@
+{
+ "ticker": "SDB.N0000",
+ "document": "Audited Financial Statements for the year ended 31st December 2024",
+ "period_end": "2024-12-31",
+ "layout": "ocr",
+ "parsing_methods": [
+  "ocr_tesseract"
+ ],
+ "note": "Page text of the located primary statements, copied from the cached parse of the issuer annual report published on the CSE.",
+ "located": {
+  "cash_flow": [
+   10
+  ]
+ },
+ "pages": {
+  "10": "Sanasa Development Bank PLC\nSTATEMENT OF CASH FLOWS\n\nYear ended 31 December 2024\n\nNote 2024 2023\nLKR LKR\n\nCash flows from /(used in) operating activities\nInterest received 20,577,268,436 25,826,399,990\nFee and commission received 696,809,121 427,167,557\nReceipts from other operating activities 2,779,833 173,691,435\nInterest payment (14,406,824,572) — (22,106,903,889)\nCash payment to employees (3,711,040,514) (2,669,947,316)\nPayments to suppliers and other operating activities (2,273,559,667) (1,474,003,662)\nFee and commission expenses (46,695,036) (36,170,237)\nOperating profit before changes in operating assets 838,737,603 140,233,878\n(Increase)/decrease in operating assets\nFunds advanced to customers 3,068,032,781 13,713,878,025\nNet (increase)/ decrease in other short term securities (1,038,710,069) (504,780,274)\nNet (increase)/ decrease in other assets (353,648,817) 981,718,908\nIncrease/(decrease) in operating liabilities\nDeposits from customers 994,426,906 1,297.608,748\nNet increase/ (decrease) in other liabilities 439,654,428 (738,504,867)\nNet cash from operating activities before taxes 3,948,492,832 14,890,154,418\nVAT on financial services paid (810,714,276) (529,353,686)\nIncome tax paid (108,284,316) (63,625,526)\nNet cash from operating activities 3,029,494,240 14,297,175,206\nCash flows from /(used in) investing activities\nDividend received 1] 291,165 7,770,016\n(Increase)/decrease in non dealing securities (151,206,356) (1,010)\n(Increase)/decrease in dealing securities (3,419,780,343) (432,167,303)\n(Increase)/decrease in treasury bonds and other investments 13,242,000,498 (9,320,167,647)\nProceeds from sale of property, plant and equipment 425,070 107,695,750\nPurchase of property, plant and equipment 25 (429,588,159) (92,141,023)\nPurchase of intangible assets 27 (165,002,818) (124,979,901)\nNet cash from/(used in) investing activities 9,077,139,057 (9,853,991,118)\nCash flows from/(used in) financing activities\nDividend paid (Withholding Tax) 37 (20,971,198) -\nRepayment of long term borrowing (20,781,743,621)  (20,696,428,601)\nInterest paid on subordinated debt (550,368,079) (901,042,055)\nIncrease/(decrease) in borrowing 9,524,870,672 16,972,269,562\nFunds received/(utilized) during the period - -\nNet cash flow from/(used in) financing activities (11,828,212,226) (4,625,201,094)\nNet increase/(decrease) in cash and cash equivalents 278,421,072 (182,017,006)\nCash and cash equivalents at the beginning of the year 18.3 3, 166,328,570 3,348,345,576\nCash and cash equivalents at the end of the year 18.3 3,444,749,642 3,166,328,570\n\nThe Accounting Policies and Notes on pages 10 through 80 from an integral part of the Financial Statements.\n\n-9-"
+ }
+}
