@@ -22,3 +22,15 @@ Understanding-Financial-Statements-English.pdf
 
 data/runs/**
 !data/runs/.gitkeep
+
+# Local web app
+web/node_modules/
+web/**/node_modules/
+web/app/.next/
+web/app/next-env.d.ts
+web/api/dist/
+web/data/
+web/.env
+web/**/*.tsbuildinfo
+web/playwright-report/
+web/test-results/

@@ -1,0 +1,15 @@
+{
+  "name": "cse-screening-web",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Local, single-user web app for the CSE screening pipeline. It displays, uploads and orchestrates; all financial logic stays in Python.",
+  "workspaces": ["api", "app"],
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "dev:api": "npm run dev -w api",
+    "dev:app": "npm run dev -w app",
+    "build": "npm run build -w api && npm run build -w app",
+    "test": "npm run test -w api",
+    "typecheck": "npm run typecheck -w api && npm run typecheck -w app"
+  }
+}
