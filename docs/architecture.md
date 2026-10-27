@@ -91,6 +91,20 @@ document discovery -> document registry -> content-addressed local cache
   `annualized` and documents the method.
 - Growth comparisons require comparable period durations and bases.
 
+## Financial issuers
+
+Banks and Diversified Financials are read with a bank row set, Insurance with
+an insurer row set (`FINANCIAL_ROWS` in `extractors/primary.py`). Banks add net
+interest income, total operating income, impairment charges, loans and advances
+and customer deposits ("Due to customers/depositors"); insurers add gross
+written premium, net earned premium, insurance revenue and insurance contract
+liabilities. `Revenue` for a bank is its total operating income and for an
+insurer its insurance revenue; it is never filled from another line. Debt-to-
+equity, net debt and free cash flow do not describe these issuers: they stay
+empty, `03_Ratios` marks them `not_applicable` with the reason, and
+`Not Applicable Metrics` lists them, so they are not reported as missing.
+A unit header such as "(Amounts in LKR Thousands)" is recognised.
+
 ## Debt, cash flow, and return policies
 
 - Total debt is the sum of interest-bearing borrowings, term and import loans,

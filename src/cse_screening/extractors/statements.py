@@ -214,7 +214,10 @@ HIGHLIGHT_ONLY_METRICS = {"bvps", "dps", "ebit"}
 
 
 def extract_metrics(
-    pages: list[str], located: dict[str, list[int]] | None = None, interim: bool = False
+    pages: list[str],
+    located: dict[str, list[int]] | None = None,
+    interim: bool = False,
+    profile: str | None = None,
 ) -> list[dict]:
     """Extract statement metrics, preferring the located primary statements.
 
@@ -227,7 +230,7 @@ def extract_metrics(
     pages = [normalize_text(page) for page in pages]
     if located is None:
         located = locate_statements(pages)
-    primary = extract_primary_metrics(pages, located, interim) if located else []
+    primary = extract_primary_metrics(pages, located, interim, profile) if located else []
     found = {item["metric"] for item in primary}
     results = list(primary)
     for candidate in _legacy_scan(pages):
@@ -249,12 +252,18 @@ def extract_metrics(
     return results
 
 
-def extract_document_metrics(pages: list[str], kind: str = "annual_report") -> list[dict]:
-    """All metric candidates for one document, one candidate per metric."""
+def extract_document_metrics(
+    pages: list[str], kind: str = "annual_report", profile: str | None = None
+) -> list[dict]:
+    """All metric candidates for one document, one candidate per metric.
+
+    ``profile`` is ``"bank"`` or ``"insurer"`` for financial issuers; it adds their
+    statement rows and defines what "revenue" means for them.
+    """
     pages = [normalize_text(page) for page in pages]
     located = locate_statements(pages)
     interim = kind == "interim_statement"
-    by_metric = {item["metric"]: item for item in extract_metrics(pages, located, interim)}
+    by_metric = {item["metric"]: item for item in extract_metrics(pages, located, interim, profile)}
     threshold = Decimal("0.8")
     if interim:
         # Layouts that print audited annual columns to the left of the row label.

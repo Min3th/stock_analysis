@@ -30,3 +30,10 @@ def test_parentheses_are_negative():
 def test_malformed_decimal_comma_from_pdf_text_is_repaired():
     assert parse_number("19,11") == D("19.11")
     assert parse_number("1,234") == D(1234)
+
+
+def test_lkr_thousands_header_is_detected():
+    from cse_screening.units import detect_unit
+
+    assert detect_unit("(Amounts in LKR Thousands)") == ("LKR '000", D(1000))
+    assert detect_unit("Rs. Thousands") == ("LKR '000", D(1000))

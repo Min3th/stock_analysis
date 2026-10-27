@@ -7,7 +7,8 @@ UNIT_PATTERNS = (
     (
         re.compile(
             r"(?:(?:sri\s+lanka\s+)?rupees?\s+(?:in\s+)?thousands?|"
-            r"(?:in\s+)?thousands?\s+of\s+(?:rs\.?|rupees?|lkr))",
+            r"(?:in\s+)?thousands?\s+of\s+(?:rs\.?|rupees?|lkr)|"
+            r"(?:rs\.?|lkr)\s*(?:in\s*)?thousands?\b)",
             re.IGNORECASE,
         ),
         "LKR '000",

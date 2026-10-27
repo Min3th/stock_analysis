@@ -112,6 +112,55 @@ PRIMARY_ROWS: dict[str, tuple[str, tuple[str, ...]]] = {
         ),
     ),
 }
+# Extra rows read only for financial issuers. ``revenue`` is overridden for banks
+# (total operating income) and insurers (insurance revenue) so that screening
+# never has to guess what "revenue" means for a balance-sheet business.
+FINANCIAL_ROWS: dict[str, dict[str, tuple[str, tuple[str, ...]]]] = {
+    "bank": {
+        "net_interest_income": ("income", (r"^net interest income\b",)),
+        "total_operating_income": (
+            "income",
+            (r"^total operating income\b", r"^net operating income before impairment\b"),
+        ),
+        "impairment_charges": (
+            "income",
+            (r"^(?:less\s*:?\s*)?impairment (?:charges?|losses|\(?reversals?\)?)\b",),
+        ),
+        "loans_and_advances": (
+            "position",
+            (
+                r"(?:^|[-–]\s*)loans and (?:advances|receivables)(?: to (?:other )?customers)?\b",
+                r"^loans and (?:advances|receivables)\b",
+            ),
+        ),
+        "customer_deposits": (
+            "position",
+            (
+                r"(?:^|[-–]\s*)due to (?:other )?(?:customers|depositors)\b",
+                r"^(?:customer|deposits from customers|deposits due to customers)\b",
+                r"^deposits? from customers\b",
+            ),
+        ),
+    },
+    "insurer": {
+        "gross_written_premium": ("income", (r"^gross written premiums?\b",)),
+        "net_earned_premium": ("income", (r"^net earned premiums?\b",)),
+        "insurance_revenue": ("income", (r"^insurance revenue\b",)),
+        "insurance_contract_liabilities": (
+            "position",
+            (r"^(?:total )?insurance contract liabilities\b",),
+        ),
+    },
+}
+# The source row that supplies ``revenue`` for each financial profile.
+FINANCIAL_REVENUE = {"bank": "total_operating_income", "insurer": "insurance_revenue"}
+# Industry groups whose statements are bank- or insurer-shaped.
+FINANCIAL_PROFILES = {
+    "Banks": "bank",
+    "Diversified Financials": "bank",
+    "Insurance": "insurer",
+}
+
 ATTRIBUTABLE_ROW = re.compile(
     r"^(?:-\s*)?(?:equity holders?|owners|shareholders|equity shareholders) of (?:the )?"
     r"(?:parent|company)\b",
@@ -337,7 +386,10 @@ def _candidate(
 
 
 def extract_primary_metrics(
-    pages: list[str], located: dict[str, list[int]], interim: bool = False
+    pages: list[str],
+    located: dict[str, list[int]],
+    interim: bool = False,
+    profile: str | None = None,
 ) -> list[dict]:
     """Extract metrics from the located primary statements only."""
     every_page = sorted({number for numbers in located.values() for number in numbers})
@@ -350,12 +402,24 @@ def extract_primary_metrics(
         for kind, numbers in located.items()
     }
     results: dict[str, dict] = {}
-    for metric, (kind, patterns) in PRIMARY_ROWS.items():
+    rows = {**PRIMARY_ROWS, **FINANCIAL_ROWS.get(profile or "", {})}
+    for metric, (kind, patterns) in rows.items():
         found = _find_row(statements.get(kind, []), patterns)
         if found is None:
             continue
         page, text, current, previous, scope, basis = found
         results[metric] = _candidate(metric, page, text, current, previous, scope, basis, kind)
+    revenue_source = results.get(FINANCIAL_REVENUE.get(profile or "", ""))
+    if profile in FINANCIAL_REVENUE:
+        results.pop("revenue", None)
+        if revenue_source is not None:
+            results["revenue"] = {
+                **revenue_source,
+                "metric": "revenue",
+                "extraction_method": f"{profile}_{FINANCIAL_REVENUE[profile]}",
+                "notes": revenue_source["notes"]
+                + f" Revenue for a {profile} is its {FINANCIAL_REVENUE[profile].replace('_', ' ')}.",
+            }
 
     if "eps" not in results:
         headed = _eps_under_heading(statements.get("income", []))

@@ -43,6 +43,17 @@ INCOME_ANCHORS = ("revenue", "net_profit", "eps")
 YEAR_TO_DATE = 0
 RESTATEMENT_TOLERANCE = {"eps": Decimal("0.02"), "revenue": Decimal("0.10")}
 
+# Ratios that do not describe a bank or insurer. They are reported as
+# ``not_applicable`` with this reason rather than null-and-review.
+NOT_APPLICABLE = {
+    "Debt-to-Equity": "Deposits and policyholder liabilities fund the balance sheet, "
+    "so borrowings / equity does not measure leverage for a financial issuer",
+    "Net Debt": "Cash is part of the operating balance sheet of a financial issuer",
+    "Free Cash Flow": "Operating cash flow of a financial issuer includes deposit and loan "
+    "movements, and capital expenditure is not a separate reported driver",
+}
+NOT_APPLICABLE_FACTS = ("capital_expenditure", "total_debt")
+
 SCREEN_COLUMNS = [
     # Columns required by the screening specification, in its order.
     "Ticker",
@@ -87,6 +98,7 @@ SCREEN_COLUMNS = [
     "Median Daily Volume",
     "Liquidity Trading Days",
     "Liquidity Period",
+    "Not Applicable Metrics",
 ]
 
 
@@ -315,6 +327,7 @@ def _ratio(
     basis: str | None,
     *facts: dict | None,
     notes: str | None = None,
+    status: str | None = None,
 ) -> dict:
     return {
         "Ticker": ticker,
@@ -327,6 +340,7 @@ def _ratio(
         "Source Pages": _pages(*facts),
         "Period Basis": basis,
         "Notes": notes,
+        "Status": status or ("calculated" if value is not None else "unavailable"),
     }
 
 
@@ -481,9 +495,13 @@ def _not_meaningful(denominator: Decimal | None) -> str | None:
 
 
 def screening_metrics(
-    snapshot: Snapshot, price: Decimal | None, history: list[dict]
+    snapshot: Snapshot, price: Decimal | None, history: list[dict], profile: str | None = None
 ) -> tuple[dict, list[dict]]:
-    """Calculate every screening metric and its lineage rows."""
+    """Calculate every screening metric and its lineage rows.
+
+    ``profile`` is ``"bank"`` or ``"insurer"``; ratios that do not describe such
+    an issuer are left empty and recorded as ``not_applicable`` with a reason.
+    """
     ticker = snapshot.ticker
     annual = snapshot.annual
     fy = snapshot.fy_label()
@@ -772,6 +790,17 @@ def screening_metrics(
     values["Latest Financial Period"] = (
         snapshot.ttm_label() if snapshot.income_basis == "ttm" else fy
     )
+    if profile:
+        for row in rows:
+            if row.get("Metric") in NOT_APPLICABLE:
+                row.update(
+                    Value=None,
+                    Status="not_applicable",
+                    Notes=f"Not applicable: {NOT_APPLICABLE[row['Metric']]}",
+                )
+        for column in NOT_APPLICABLE:
+            values[column] = None
+        values["Not Applicable Metrics"] = "; ".join(NOT_APPLICABLE)
     return values, rows
 
 

@@ -14,6 +14,7 @@ import httpx
 import yaml
 
 from .calculations.screening import (
+    NOT_APPLICABLE_FACTS,
     SCREEN_COLUMNS,
     Snapshot,
     build_snapshot,
@@ -28,6 +29,7 @@ from .downloaders.liquidity import LiquidityStore
 from .downloaders.local import upload_documents
 from .downloaders.universe import CSEUniverseClient, apply_universe_config
 from .exporters.workbook import export_all
+from .extractors.primary import FINANCIAL_PROFILES
 from .extractors.statements import (
     METRIC_ALIASES,
     extract_document_metrics,
@@ -158,6 +160,7 @@ def run(
         price = _decimal(market.get("price"))
         market_cap = _decimal(market.get("market_cap"))
         implied_shares = (market_cap / price).quantize(Decimal(1)) if market_cap and price else None
+        profile = FINANCIAL_PROFILES.get(issuer.get("industry_group") or industry_group)
         multi_class = share_classes[issuer["ticker"].split(".", 1)[0]] > 1
         annual_periods = [
             str(item["period_end"])
@@ -201,7 +204,7 @@ def run(
                                 "url": document["url"],
                             }
                         )
-                extracted = extract_document_metrics(pages, document["kind"])
+                extracted = extract_document_metrics(pages, document["kind"], profile)
                 for candidate in extracted:
                     page_method = parsed.methods[candidate["page"] - 1]
                     strategy = candidate.get("extraction_method", "statement_label_line")
@@ -373,7 +376,7 @@ def run(
             raw_by_id[market_fact["fact_id"]] = record = _market_fact_record(issuer, market_fact)
             raw.append(record)
         snapshot = build_snapshot(issuer["ticker"], document_facts, usable)
-        metrics, lineage = screening_metrics(snapshot, price, observations)
+        metrics, lineage = screening_metrics(snapshot, price, observations, profile)
         for fact in snapshot.annual.values():
             raw_by_id[fact["fact_id"]]["Used In Screening"] = "yes"
         for fact in snapshot.ttm.values():
@@ -459,7 +462,11 @@ def run(
         )
         screening.append(row)
         required_metrics = [*METRIC_ALIASES, "total_debt", "ordinary_shares_outstanding"]
-        missing = [metric for metric in required_metrics if metric not in snapshot.annual]
+        missing = [
+            metric
+            for metric in required_metrics
+            if metric not in snapshot.annual and not (profile and metric in NOT_APPLICABLE_FACTS)
+        ]
         if not issuer.get("documents"):
             document_errors.append(
                 "No official financial document URLs are configured yet; market data only"

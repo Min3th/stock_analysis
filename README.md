@@ -390,8 +390,11 @@ they are never used as company-specific facts.
   company's page citations before relying on its numbers.
 - Statement layouts outside that sample can defeat the locator or the layout
   reader. The value is then withheld or marked `assumed`, not guessed, and
-  appears in `manual_review.csv`. Other industry groups, banks and insurers in
-  particular, use different statement rows and have not been tested.
+  appears in the sector's manual-review CSV. Banks, Diversified Financials and
+  insurers have their own statement rows (see "Financial issuers" in docs/architecture.md); 9 of 15
+  Banks tickers produced revenue and profit in the last offline run, and the
+  rest are withheld for review. Insurers have row labels but no cached filing
+  has been checked against them.
 - TTM has only been exercised on first-quarter interim statements. Half-year
   and nine-month layouts (quarter and cumulative blocks) are handled by rule
   and unit tests, not yet by real filings; where the year-to-date block cannot
