@@ -23,6 +23,16 @@ npm run dev:app             # http://127.0.0.1:3000
 `npm test` runs the API tests (Vitest + Supertest). `npm run typecheck` checks both
 workspaces and `npm run build` builds them.
 
+## Runs
+
+`POST /api/runs {sector, period, ticker?, offline?}` queues a run. A single worker
+executes `python main.py run ... --run-dir data/runs/<run_id>` one at a time, with an
+argument array and no shell. The sector is checked against an allow-list (kept in step
+with the Python package by a test), the ticker and period against strict patterns.
+`GET /api/runs/:id/events` streams the process output as server-sent events (the stored
+log is replayed first, so a late viewer sees everything). When the server restarts, any
+run that was still queued or running is marked failed.
+
 ## Notes
 
 - Node 20 or later. `better-sqlite3` is a native module; the install downloads a

@@ -1,10 +1,12 @@
 import { createApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { openDb } from "./db.js";
+import { JobQueue } from "./jobs.js";
 
 const config = loadConfig();
 const db = openDb(config.dbPath);
-const app = createApp(config, db);
+const queue = new JobQueue(config, db);
+const app = createApp(config, db, queue);
 
 // Bound to the loopback interface only: this is a single-user local tool.
 const server = app.listen(config.port, config.host, () => {

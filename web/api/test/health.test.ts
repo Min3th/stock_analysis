@@ -1,17 +1,11 @@
 import request from "supertest";
 import { describe, expect, it } from "vitest";
-import { createApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
-import { openDb } from "../src/db.js";
-
-function makeApp(env: NodeJS.ProcessEnv = {}) {
-  const config = loadConfig({ ...env });
-  return { config, app: createApp(config, openDb(":memory:")) };
-}
+import { harness } from "./helpers.js";
 
 describe("health", () => {
   it("reports the loopback binding and the schema", async () => {
-    const { app, config } = makeApp();
+    const { app, config } = harness();
     const res = await request(app).get("/api/health");
     expect(res.status).toBe(200);
     expect(res.body.status).toBe("ok");
@@ -23,7 +17,7 @@ describe("health", () => {
   });
 
   it("allows only the configured web origin", async () => {
-    const { app } = makeApp({ WEB_ORIGIN: "http://127.0.0.1:3000" });
+    const { app } = harness(undefined, { WEB_ORIGIN: "http://127.0.0.1:3000" });
     const allowed = await request(app).get("/api/health").set("Origin", "http://127.0.0.1:3000");
     expect(allowed.headers["access-control-allow-origin"]).toBe("http://127.0.0.1:3000");
     const other = await request(app).get("/api/health").set("Origin", "http://evil.example");
@@ -31,7 +25,7 @@ describe("health", () => {
   });
 
   it("returns JSON for unknown API paths", async () => {
-    const { app } = makeApp();
+    const { app } = harness();
     const res = await request(app).get("/api/nope");
     expect(res.status).toBe(404);
     expect(res.body).toEqual({ error: "not_found" });
