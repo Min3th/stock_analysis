@@ -6,6 +6,7 @@ import { type Run } from "@/lib/api";
 import { formatValue, MISSING, type Row } from "@/lib/format";
 import { useApi } from "@/lib/use-api";
 import { DistributionChart } from "./distribution-chart";
+import { ExportButton } from "./export-button";
 import { ScreeningTable } from "./screening-table";
 import { StatusBadge } from "./status-badge";
 
@@ -72,6 +73,12 @@ export function SectorView({ runId }: { runId: string }) {
           <span>Commit {info.gitCommit?.slice(0, 7) ?? MISSING}</span>
           <span>Config {info.configHash ?? MISSING}</span>
         </p>
+        {ready && (
+          <p className="flex flex-wrap gap-2 pt-1">
+            <ExportButton label="Download sector report (PDF)" body={{ type: "sector", runId }} />
+            <ExportButton label="Download review pack (PDF)" body={{ type: "review", runId }} />
+          </p>
+        )}
       </header>
 
       {!ready && (

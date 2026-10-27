@@ -50,8 +50,21 @@ scope allow-lists, page, reason) and calls `main.py corrections add` with `--fla
 original extraction stays on record and the next run of that company applies the correction, marking an
 older one `superseded` when `supersedes` is given.
 
+## PDF exports
+
+`POST /api/exports {type: sector|company|review, runId, ticker?}` returns a PDF. The API opens the
+app's print route (`/print/sector/<run>`, `/print/company/<run>/<ticker>`, `/print/review/<run>`) in
+headless Chromium (Playwright), waits until the page reports its data loaded, and prints it to A4.
+Each report starts with a cover (run id, scope, pipeline commit, config hash, finish time) and the
+fixed disclaimer, and every page footer repeats it. The sector report is landscape and ends with a
+sources appendix (URL and checksum per document); the company sheet lists each calculation with its
+formula and input fact IDs, plus a citations table; the review pack lists every item with its source
+text and page. A page that fails to load its data is never exported. The browser needs
+`npx playwright install chromium` once.
+
 ## Notes
 
+- `WEB_URL` (default `http://127.0.0.1:3000`) is where the API finds the print routes.
 - Node 20 or later. `better-sqlite3` is a native module; the install downloads a
   prebuilt binary for your Node version.
 - SQLite lives in `web/data/` (git-ignored). Run output stays in `data/runs/<run_id>/`.

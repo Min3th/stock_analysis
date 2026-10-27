@@ -10,6 +10,8 @@ export interface Config {
   dbPath: string;
   allowedOrigins: string[];
   uploadLimitBytes: number;
+  /** Where the Next.js app is served; PDF exports render its /print routes. */
+  webUrl: string;
 }
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -37,5 +39,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       .map((origin) => origin.trim())
       .filter(Boolean),
     uploadLimitBytes: Math.max(1, limitMb) * 1024 * 1024,
+    webUrl: env.WEB_URL ?? "http://127.0.0.1:3000",
   };
 }

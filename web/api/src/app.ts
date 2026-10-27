@@ -2,9 +2,11 @@ import express from "express";
 import type { Config } from "./config.js";
 import type { Db } from "./db.js";
 import type { JobQueue } from "./jobs.js";
+import { playwrightRenderer, type PdfRenderer } from "./pdf.js";
 import { pythonRunner, type PythonRunner } from "./python.js";
 import { correctionsRouter } from "./routes/corrections.js";
 import { documentsRouter } from "./routes/documents.js";
+import { exportsRouter } from "./routes/exports.js";
 import { healthRouter } from "./routes/health.js";
 import { runsRouter } from "./routes/runs.js";
 import { tablesRouter } from "./routes/tables.js";
@@ -13,6 +15,7 @@ import { uploadsRouter } from "./routes/uploads.js";
 
 export interface Deps {
   python?: PythonRunner;
+  pdf?: PdfRenderer;
 }
 
 export function createApp(
@@ -49,6 +52,7 @@ export function createApp(
   const python = deps.python ?? pythonRunner(config);
   app.use("/api", uploadsRouter(config, db, python));
   app.use("/api", correctionsRouter(db, python));
+  app.use("/api", exportsRouter(queue, deps.pdf ?? playwrightRenderer(config.webUrl)));
 
   app.use("/api", (_req, res) => {
     res.status(404).json({ error: "not_found" });

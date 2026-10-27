@@ -45,8 +45,33 @@ body {
   .no-print {
     display: none !important;
   }
+  :root {
+    --bg: #fff;
+    --surface: #fff;
+    --ink: #000;
+    --muted: #444;
+    --line: #bbb;
+    --warn-bg: #fff6e0;
+    --warn-ink: #3d2f00;
+  }
   body {
     background: #fff;
     color: #000;
+  }
+  main {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+  footer {
+    display: none !important;
+  }
+  tr {
+    break-inside: avoid;
+  }
+  thead {
+    display: table-header-group;
+  }
+  .break-inside-avoid {
+    break-inside: avoid;
   }
 }

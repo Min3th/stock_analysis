@@ -5,6 +5,7 @@ import { useState } from "react";
 import { type Run } from "@/lib/api";
 import { CONFIDENCE_LABEL, formatExact, formatValue, MISSING, type Row } from "@/lib/format";
 import { useApi } from "@/lib/use-api";
+import { ExportButton } from "./export-button";
 import { HistoryChart } from "./history-chart";
 import { LineageDrawer, lineageRows } from "./lineage-drawer";
 import { SourceViewer, type SourceRef } from "./source-viewer";
@@ -92,6 +93,9 @@ export function CompanyView({ runId, ticker }: { runId: string; ticker: string }
           <span>Cash-flow basis: {String(row["Cash Flow Period Basis"] ?? MISSING)}</span>
           <span>Balance sheet: {String(row["Balance Sheet Date"] ?? MISSING)}</span>
           <span>Price {formatValue("Current Price", row["Current Price"])}</span>
+        </p>
+        <p className="pt-1">
+          <ExportButton label="Download company sheet (PDF)" body={{ type: "company", runId, ticker }} />
         </p>
       </header>
 
