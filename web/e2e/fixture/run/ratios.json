@@ -1,0 +1,15 @@
+[
+ {
+  "Ticker": "AAA.N0000",
+  "Metric": "ROE",
+  "Value": "0.187227",
+  "Formula": "Net profit attributable to ordinary shareholders / average ordinary equity",
+  "Numerator": "6337879000",
+  "Denominator": "33851268000",
+  "Input Fact IDs": "AAA.N0000:a1b2c3d4e5f60718:net_profit_attributable:2; AAA.N0000:a1b2c3d4e5f60718:ordinary_equity:3",
+  "Source Pages": "2; 3",
+  "Period Basis": "FY to 2026-03-31",
+  "Notes": null,
+  "Status": "calculated"
+ }
+]

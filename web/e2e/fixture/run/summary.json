@@ -1,0 +1,37 @@
+[
+ {
+  "Metric": "Companies processed",
+  "Value": 3,
+  "Observations": null
+ },
+ {
+  "Metric": "Companies with high data confidence",
+  "Value": 1,
+  "Observations": null
+ },
+ {
+  "Metric": "Companies requiring review",
+  "Value": 1,
+  "Observations": null
+ },
+ {
+  "Metric": "Companies with low data confidence",
+  "Value": 1,
+  "Observations": null
+ },
+ {
+  "Metric": "Sector median ROE",
+  "Value": 0.073,
+  "Observations": 2
+ },
+ {
+  "Metric": "Sector median P/B",
+  "Value": 1.1,
+  "Observations": 3
+ },
+ {
+  "Metric": "Medians use companies with a defined value.",
+  "Value": null,
+  "Observations": null
+ }
+]

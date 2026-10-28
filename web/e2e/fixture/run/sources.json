@@ -1,0 +1,14 @@
+[
+ {
+  "Company": "ALPHA INDUSTRIES PLC",
+  "Ticker": "AAA.N0000",
+  "Document ID": "a1b2c3d4e5f60718",
+  "Document": "Annual Report as at 31st March 2026",
+  "Type": "annual_report",
+  "Period End": "2026-03-31",
+  "Source URL": "https://cdn.cse.lk/example/aaa-ar-2026.pdf",
+  "Local Path": "{RAW}/AAA_N0000/a1b2c3d4e5f60718.pdf",
+  "SHA256": "a1b2c3d4e5f60718000000000000000000000000000000000000000000000000",
+  "Source Type": "cse_or_configured"
+ }
+]

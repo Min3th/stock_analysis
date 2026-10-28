@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState, type DragEvent, type FormEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent, type FormEvent } from "react";
 import { api, type Company } from "@/lib/api";
 import { formatExact, MISSING } from "@/lib/format";
 import { useApi } from "@/lib/use-api";
@@ -62,6 +62,9 @@ export function UploadFlow() {
   const [error, setError] = useState<string | null>(null);
   const [record, setRecord] = useState<UploadRecord | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  // Tells tests (and nothing else) that the page is interactive and will keep what is typed.
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => setHydrated(true), []);
 
   function pick(files: FileList | null) {
     const chosen = files?.[0] ?? null;
@@ -122,7 +125,7 @@ export function UploadFlow() {
   const p = record?.preview;
   return (
     <div className="space-y-6">
-      <form onSubmit={preview} className="space-y-4 rounded border border-line bg-surface p-4">
+      <form onSubmit={preview} data-hydrated={hydrated} className="space-y-4 rounded border border-line bg-surface p-4">
         <div
           onDragOver={(e) => {
             e.preventDefault();

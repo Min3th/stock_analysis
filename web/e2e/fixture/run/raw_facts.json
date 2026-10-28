@@ -1,0 +1,26 @@
+[
+ {
+  "Fact ID": "AAA.N0000:a1b2c3d4e5f60718:net_profit_attributable:2",
+  "Ticker": "AAA.N0000",
+  "Metric": "net_profit_attributable",
+  "Financial Period": "2026-03-31",
+  "Extracted Value": "6337879000",
+  "Unit": "LKR",
+  "Source Document": "Annual Report as at 31st March 2026",
+  "Source Page": 2,
+  "Extraction Confidence": "0.90",
+  "Source Text": "Profit attributable to owners of the company 6,337,879 4,579,459"
+ },
+ {
+  "Fact ID": "AAA.N0000:a1b2c3d4e5f60718:ordinary_equity:3",
+  "Ticker": "AAA.N0000",
+  "Metric": "ordinary_equity",
+  "Financial Period": "2026-03-31",
+  "Extracted Value": "36904358000",
+  "Unit": "LKR",
+  "Source Document": "Annual Report as at 31st March 2026",
+  "Source Page": 3,
+  "Extraction Confidence": "0.90",
+  "Source Text": "Total equity attributable to owners 36,904,358 30,798,178"
+ }
+]

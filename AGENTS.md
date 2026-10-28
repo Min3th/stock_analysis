@@ -39,6 +39,7 @@ investor-relations sources.
 ```text
 main.py                              CLI: run (default), extract, corrections add, uploads add
 scripts/coverage_report.py          fill and reconciliation rates per cached industry group
+web/                                local web app (Express API + Next.js UI); see web/README.md
 config/uploads.yml                  append-only user-supplied filings (written by `uploads add`)
 data/runs/<run_id>/                 JSON tables + manifest.json when --run-dir is given (git-ignored)
 config/companies.yml                universe overlay and document fallbacks

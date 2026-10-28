@@ -1,0 +1,41 @@
+[
+ {
+  "Ticker": "AAA.N0000",
+  "Company": "ALPHA INDUSTRIES PLC",
+  "Financial Year End": "2024-03-31",
+  "Metric": "revenue",
+  "Value": "30000000000",
+  "Unit": "LKR",
+  "Source Document": "Annual Report as at 31st March 2026",
+  "Source Page": 2,
+  "Confidence": "0.90",
+  "Value Basis": "reported comparative",
+  "Source Period End": "2026-03-31"
+ },
+ {
+  "Ticker": "AAA.N0000",
+  "Company": "ALPHA INDUSTRIES PLC",
+  "Financial Year End": "2025-03-31",
+  "Metric": "revenue",
+  "Value": "38800000000",
+  "Unit": "LKR",
+  "Source Document": "Annual Report as at 31st March 2026",
+  "Source Page": 2,
+  "Confidence": "0.90",
+  "Value Basis": "reported comparative",
+  "Source Period End": "2026-03-31"
+ },
+ {
+  "Ticker": "AAA.N0000",
+  "Company": "ALPHA INDUSTRIES PLC",
+  "Financial Year End": "2026-03-31",
+  "Metric": "revenue",
+  "Value": "47144820000",
+  "Unit": "LKR",
+  "Source Document": "Annual Report as at 31st March 2026",
+  "Source Page": 2,
+  "Confidence": "0.90",
+  "Value Basis": "reported current",
+  "Source Period End": "2026-03-31"
+ }
+]

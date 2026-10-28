@@ -62,6 +62,18 @@ formula and input fact IDs, plus a citations table; the review pack lists every 
 text and page. A page that fails to load its data is never exported. The browser needs
 `npx playwright install chromium` once.
 
+## Tests
+
+- `npm test` runs the API tests (Vitest and Supertest): validation, the job queue with a stub
+  pipeline, SSE replay, tables, cited documents (including path-escape attempts), uploads,
+  corrections and exports. No Python or browser is needed.
+- `npm run e2e` runs Playwright against the real API and a production build of the app, using a
+  throwaway repository root (`e2e/fixture`) with a stub `main.py` and a committed fixture run, so it
+  needs no network and no cache. It covers the dashboard, an offline run, the sector table, the
+  lineage drawer, the cited PDF, a correction, an upload preview and all three PDF exports. The first
+  run needs `npx playwright install chromium`.
+- The stub `main.py` only copies fixture JSON; the real pipeline is covered by the Python tests.
+
 ## Notes
 
 - `WEB_URL` (default `http://127.0.0.1:3000`) is where the API finds the print routes.

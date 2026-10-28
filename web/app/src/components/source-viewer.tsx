@@ -19,8 +19,9 @@ export function SourceViewer({ source, onClose }: { source: SourceRef; onClose: 
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const element = dialog.current;
+    // No cleanup close(): it would fire the dialog's close event and dismiss it again
+    // (React Strict Mode runs effects twice in development). Unmounting removes it.
     if (element && !element.open) element.showModal();
-    return () => element?.close();
   }, [source]);
 
   const fragment = source.page ? `#page=${source.page}` : "";

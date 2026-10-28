@@ -28,9 +28,19 @@ export function playwrightRenderer(webUrl: string, timeoutMs = 90_000): PdfRende
       const context = await browser.newContext();
       try {
         const page = await context.newPage();
+        const problems: string[] = [];
+        page.on("pageerror", (error) => problems.push(error.message));
+        page.on("console", (message) => message.type() === "error" && problems.push(message.text()));
+        page.on("response", (response) => response.status() >= 400 && problems.push(`HTTP ${response.status()} ${new URL(response.url()).pathname}`));
         // The path is built by the API from validated parts; the host is fixed.
-        await page.goto(new URL(path, webUrl).toString(), { waitUntil: "networkidle", timeout: timeoutMs });
-        await page.waitForSelector('[data-print-ready="true"], [data-print-error="true"]', { timeout: timeoutMs });
+        await page.goto(new URL(path, webUrl).toString(), { waitUntil: "domcontentloaded", timeout: timeoutMs });
+        try {
+          await page.waitForSelector('[data-print-ready="true"], [data-print-error="true"]', { timeout: timeoutMs });
+        } catch {
+          // Say what the page was doing, not just that it timed out.
+          const text = (await page.locator("body").innerText().catch(() => "")).replace(/\s+/g, " ").slice(0, 160);
+          throw new Error(`The report page did not finish loading (${problems.slice(0, 3).join("; ") || "no page errors"}); it showed: ${text}`);
+        }
         const failure = page.locator('[data-print-error="true"]');
         if ((await failure.count()) > 0) {
           throw new Error((await failure.first().innerText()).trim());

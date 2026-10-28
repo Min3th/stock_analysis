@@ -1,0 +1,22 @@
+{
+ "group": {
+  "industry_group": "Capital Goods"
+ },
+ "companies": [
+  {
+   "ticker": "AAA.N0000",
+   "name": "ALPHA INDUSTRIES PLC",
+   "industry_group": "Capital Goods"
+  },
+  {
+   "ticker": "BBB.N0000",
+   "name": "BETA HOLDINGS PLC",
+   "industry_group": "Capital Goods"
+  },
+  {
+   "ticker": "CCC.X0000",
+   "name": "GAMMA TRADING PLC",
+   "industry_group": "Capital Goods"
+  }
+ ]
+}

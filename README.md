@@ -460,6 +460,17 @@ they are never used as company-specific facts.
    limitation above).
 6. Next: manual spot-checks recorded as fixtures and an end-to-end test.
 
+## Local web app
+
+`web/` holds an optional, single-user browser interface for the same pipeline: an Express API that
+binds to 127.0.0.1 and runs `main.py` as background jobs, and a Next.js UI. It shows runs and their
+live output, the sector table with sorting, filters, medians and distribution charts, a company page
+whose every metric opens its formula, input facts and the cited PDF page, a review queue with a
+correction form, PDF upload with an extraction preview, and sector, company and review-pack PDF
+exports. It reads the JSON that `main.py run --run-dir` writes and never calculates a ratio; uploads
+and corrections reach the YAML files only through `main.py`. See `web/README.md` for setup
+(`cd web; npm install; npm run dev:api; npm run dev:app`) and its tests (`npm test`, `npm run e2e`).
+
 ## Measured coverage
 
 `python scripts/coverage_report.py` runs each supported industry group from the

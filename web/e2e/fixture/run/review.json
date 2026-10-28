@@ -1,0 +1,28 @@
+[
+ {
+  "Company": "ALPHA INDUSTRIES PLC",
+  "Ticker": "AAA.N0000",
+  "Metric": "net_profit",
+  "Financial Period": "2026-03-31",
+  "Candidate Values": "7537142; 6337879",
+  "Source Document": "Annual Report as at 31st March 2026",
+  "Source Page": 2,
+  "Source Text": "Profit attributable to owners of the company 6,337,879 4,579,459",
+  "Extraction Strategy": "primary_income_row",
+  "Validation Rule": "low_confidence",
+  "Reason for Uncertainty": "Two candidate rows disagree; check the income statement."
+ },
+ {
+  "Company": "BETA HOLDINGS PLC",
+  "Ticker": "BBB.N0000",
+  "Metric": "bvps",
+  "Financial Period": "2026-03-31",
+  "Candidate Values": "",
+  "Source Document": "",
+  "Source Page": "",
+  "Source Text": "",
+  "Extraction Strategy": "",
+  "Validation Rule": "missing_metric",
+  "Reason for Uncertainty": "No candidate for this metric was found in the latest annual report"
+ }
+]

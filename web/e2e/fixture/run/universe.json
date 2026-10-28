@@ -1,0 +1,17 @@
+[
+ {
+  "Ticker": "AAA.N0000",
+  "Company": "ALPHA INDUSTRIES PLC",
+  "Included": true
+ },
+ {
+  "Ticker": "BBB.N0000",
+  "Company": "BETA HOLDINGS PLC",
+  "Included": true
+ },
+ {
+  "Ticker": "CCC.X0000",
+  "Company": "GAMMA TRADING PLC",
+  "Included": true
+ }
+]
